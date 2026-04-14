@@ -36,7 +36,7 @@
         /* Modals */
         .modal-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); display: flex; justify-content: center; align-items: center; z-index: 200; }
         .modal-content { background: var(--sidebar); padding: 30px; border-radius: 10px; width: 500px; box-shadow: 0 10px 40px rgba(0,0,0,0.8); }
-        .ts-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 15px; margin-bottom: 25px; max-height: 300px; overflow-y: auto; padding-right: 10px;}
+        .ts-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 15px 0 25px 0; max-height: 300px; overflow-y: auto; padding-right: 10px;}
         .ts-btn { background: #111; border: 1px solid #444; color: white; padding: 12px; border-radius: 4px; cursor: pointer; font-weight: bold; text-align: center; transition: 0.2s; }
         .ts-btn:hover { background: var(--info); border-color: var(--info); }
 
@@ -124,10 +124,10 @@
         <div class="card">
             <h1 style="color: white; margin-top: 0;">Virtual Ringer</h1>
             <h2 style="color: var(--info); margin-top: -15px;">Practice Room</h2>
-            <p style="color: #bdc3c7; font-size: 0.9em; margin-bottom: 30px;">Load a .ringer file generated from the Director's Workshop to practice your assigned bells.</p>
+            <p style="color: #bdc3c7; font-size: 0.9em; margin-bottom: 30px;">Select a song from the library to begin practicing.</p>
             
             <div id="song-library">
-                <!-- Dynamically populated from CONFIG -->
+                <!-- Dynamically populated via GitHub API -->
             </div>
 
             <hr style="border: 0; border-top: 1px solid #444; width: 100%; margin: 15px 0;">
@@ -248,17 +248,20 @@
 const CONFIG = {
     // 1. Where are your custom audio files hosted?
     AUDIO_BASE_URL: "./audio/",
-    
-    // Set your preferred audio format here (.mp3, .ogg, .wav, .m4a)
     AUDIO_FORMAT: ".mp3",
     
     // 2. Where are your exported .ringer files hosted?
     SONG_BASE_URL: "./songs/",
     
-    // 3. List the exact filenames of the .ringer files you want in the main menu:
-    SONGS: [
-        // Example: "Carol_of_the_Bells.ringer",
-        // Example: "Joy_to_the_World.ringer"
+    // ========================================================
+    // AUTO-DISCOVERY OF SONGS VIA GITHUB API
+    GITHUB_USERNAME: "mablackburn",
+    GITHUB_REPO: "bellplayer",
+    // ========================================================
+    
+    // 3. Fallback list (Used ONLY if the GitHub API fails or you are offline)
+    FALLBACK_SONGS: [
+        // "Carol_of_the_Bells.ringer"
     ]
 };
 // ==========================================
@@ -308,18 +311,39 @@ const app = {
         this.renderSongLibrary();
     },
     
-    renderSongLibrary() {
+    async renderSongLibrary() {
         const libraryDiv = document.getElementById('song-library');
         if (!libraryDiv) return;
-        
-        if (CONFIG.SONGS.length === 0) {
-            libraryDiv.innerHTML = `<div style="color: #7f8c8d; font-style: italic; font-size: 0.9em;">No songs listed in CONFIG yet. Use the 'Load Local' button below.</div>`;
+
+        libraryDiv.innerHTML = `<div style="color: #bdc3c7; font-style: italic;">Scanning library...</div>`;
+
+        let songFiles = [];
+
+        if (CONFIG.GITHUB_USERNAME && CONFIG.GITHUB_USERNAME !== "your-username" && CONFIG.GITHUB_REPO && CONFIG.GITHUB_REPO !== "your-repo-name") {
+            try {
+                const response = await fetch(`https://api.github.com/repos/${CONFIG.GITHUB_USERNAME}/${CONFIG.GITHUB_REPO}/contents/songs`);
+                if (response.ok) {
+                    const files = await response.json();
+                    songFiles = files.filter(f => f.name.endsWith('.ringer') || f.name.endsWith('.json')).map(f => f.name);
+                } else {
+                    console.warn("GitHub API failed or repo is private. Using fallback list.");
+                    songFiles = CONFIG.FALLBACK_SONGS;
+                }
+            } catch (e) {
+                console.warn("Could not reach GitHub API. Using fallback list.", e);
+                songFiles = CONFIG.FALLBACK_SONGS;
+            }
+        } else {
+            songFiles = CONFIG.FALLBACK_SONGS;
+        }
+
+        if (songFiles.length === 0) {
+            libraryDiv.innerHTML = `<div style="color: #7f8c8d; font-style: italic; font-size: 0.9em; margin-top: 10px;">No songs found automatically. Double check your Github username/repo name in the CONFIG, or ensure you have a 'songs' folder uploaded. Use the manual Load button below to load local files.</div>`;
             return;
         }
         
         let html = '';
-        CONFIG.SONGS.forEach(filename => {
-            // Clean up the filename to look like a nice title
+        songFiles.forEach(filename => {
             let cleanTitle = filename.replace('.ringer', '').replace('.json', '').replace(/_/g, ' ');
             html += `
                 <button class="song-btn" onclick="app.fetchHostedSong('${filename}', '${cleanTitle}')">
@@ -386,7 +410,6 @@ const app = {
         }
     },
     
-    // Handles specific technique filenames (e.g., C4_mart.mp3)
     getAudioFileName(pitchIdx, acc, tech) {
         const notes = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
         const noteLetter = notes[((pitchIdx % 7) + 7) % 7];
@@ -396,7 +419,6 @@ const app = {
         if (acc === 'flat') accStr = 'b';
         
         let techStr = '';
-        // LV just means 'Let Vibrate', it uses the standard ring sound
         if (tech && tech !== 'none' && tech !== 'lv') {
             techStr = `_${tech}`;
         }
@@ -424,9 +446,11 @@ const app = {
         });
 
         const labelUI = document.getElementById('player-part-label');
-        const originalText = labelUI.innerText;
-        labelUI.innerText = "Loading Audio...";
-        labelUI.style.color = "var(--manual)";
+        const originalText = labelUI ? labelUI.innerText : "Part ?";
+        if (labelUI) {
+            labelUI.innerText = "Loading Audio...";
+            labelUI.style.color = "var(--manual)";
+        }
 
         const promises = Array.from(uniqueBells).map(async nKey => {
             const [pStr, acc, tech] = nKey.split('_');
@@ -440,20 +464,20 @@ const app = {
                 }
             } catch(e) {
                 // Fails silently - will fall back to synth in playTone
-                console.log(`Missing custom audio: ${fileName}. Will use fallback.`);
             }
         });
 
         await Promise.all(promises);
         
-        labelUI.innerText = originalText;
-        labelUI.style.color = "var(--info)";
+        if (labelUI) {
+            labelUI.innerText = originalText;
+            labelUI.style.color = "var(--info)";
+        }
     },
 
     playTone(pitchIdx, acc, volumeMult = 1.0, tech = 'none') {
         if (!this.audioCtx) return;
         
-        // Active tones are keyed by the physical bell, not the technique
         const physicalBellKey = `${pitchIdx}_${acc}`;
         if (this.activeTones[physicalBellKey]) this.dampenTone(pitchIdx, acc, true);
         
@@ -466,14 +490,12 @@ const app = {
         const buffer = this.audioBuffers[targetBufferKey] || this.audioBuffers[fallbackBufferKey];
         
         if (buffer) {
-            // CUSTOM MP3
             const source = this.audioCtx.createBufferSource();
             source.buffer = buffer;
             
             const mainGain = this.audioCtx.createGain();
             mainGain.connect(this.masterCompressor);
             
-            // We apply our dynamics engine envelope even to custom audio!
             mainGain.gain.setValueAtTime(0, t);
             mainGain.gain.linearRampToValueAtTime(volumeMult * 1.5, t + 0.02);
             mainGain.gain.setTargetAtTime(0.0001, t + 0.02, 3.5); 
@@ -483,7 +505,6 @@ const app = {
             this.activeTones[physicalBellKey] = { mainGain, source, isBuffer: true };
             
         } else {
-            // SYNTH FALLBACK
             const semitones = [0, 2, 4, 5, 7, 9, 11];
             const octave = Math.floor(pitchIdx / 7);
             const noteClass = ((pitchIdx % 7) + 7) % 7;
@@ -517,7 +538,6 @@ const app = {
             osc2.connect(overGain);
             osc2.start(t);
             
-            // Fast decay for Bucket 3 (Percussive)
             if (techBucket === 3) {
                 mainGain.gain.setTargetAtTime(0.0001, t + 0.02, 0.1); 
                 osc1.stop(t + 1.0);
@@ -601,7 +621,6 @@ const app = {
         document.getElementById('player-setup-modal').classList.remove('hidden');
     },
 
-    // Process JSON data to build the Part Selection UI (Used by both Local and Network Loaders)
     processLoadedData(data, title) {
         if (!data.measures || !Array.isArray(data.measures)) throw new Error("Missing measures data");
         this.playbackData = data;
@@ -646,7 +665,6 @@ const app = {
         document.getElementById('main-menu').classList.add('hidden');
     },
 
-    // Fetch a song directly from the Network/GitHub folder
     async fetchHostedSong(filename, title) {
         try {
             const res = await fetch(CONFIG.SONG_BASE_URL + filename);
@@ -659,7 +677,6 @@ const app = {
         }
     },
 
-    // Local file fallback
     loadLocalFile(e) {
         const file = e.target.files[0];
         if (!file) return;
@@ -687,8 +704,10 @@ const app = {
         }
         
         const labelEl = document.getElementById('player-part-label');
-        labelEl.innerText = pLabel;
-        labelEl.title = pLabel; // Show full name on hover if it truncates
+        if (labelEl) {
+            labelEl.innerText = pLabel;
+            labelEl.title = pLabel; // Show full name on hover if it truncates
+        }
         
         // Essential requirement: AudioContext must be initialized by a user click!
         this.initAudio();
