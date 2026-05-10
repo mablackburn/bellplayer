@@ -122,7 +122,7 @@
     <!-- Main Menu & Library -->
     <div id="main-menu">
         <div class="card">
-            <h1 style="color: white; margin-top: 0;">TVA Bells</h1>
+            <h1 style="color: white; margin-top: 0;">Virtual Ringer</h1>
             <h2 style="color: var(--info); margin-top: -15px;">Practice Room</h2>
             <p style="color: #bdc3c7; font-size: 0.9em; margin-bottom: 30px;">Select a song from the library to begin practicing.</p>
             
@@ -270,6 +270,7 @@ const CONFIG = {
 const app = {
     playerCanvas: null, playerCtx: null, playbackData: null,
     audioCtx: null, masterCompressor: null, activeTones: {}, audioBuffers: {},
+    pageImages: {}, // Stores the loaded sheet music images
     
     // Auto-detected GitHub Paths
     songDownloadUrls: {}, githubRawBaseUrl: "",
@@ -301,7 +302,7 @@ const app = {
         partBells: [], flatNotes: [], flatMeasures: [], flatMetronomeBeats: [], flatVisualBeats: [],
         tempoEvents: [], volEvents: [],
         pixelsPerBeat: 250, pitchZoom: 1.0, tempoMultiplier: 1.0, metronomeVolume: 1.0, backgroundVolume: 0.4,
-        isLooping: false, loopCountIn: true, loopStartMeasure: 0, loopEndMeasure: 1, metronomeEnabled: true,
+        isLooping: false, loopCountIn: true, loopStartMeasure: 0, loopEndMeasure: 1, metronomeEnabled: true, showSheetMusic: false,
         reqId: null, minPitch: 0, maxPitch: 60,
         bellKeyMap: {}, heldKeys: {}, scorePct: 100, totalActions: 0, missedActions: 0, flares: [],
         previousLoopScore: null, loopHistory: []
@@ -383,6 +384,12 @@ const app = {
         window.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return; 
             if (document.getElementById('player-layout').style.display === 'flex') {
+                if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 's') {
+                    e.preventDefault();
+                    this.playerState.showSheetMusic = !this.playerState.showSheetMusic;
+                    if (!this.playerState.isPlaying) this.renderPlayer();
+                    return;
+                }
                 if (e.code === 'Space') { e.preventDefault(); this.togglePlayerPlay(); return; }
                 if (e.repeat) return; 
                 const key = e.key.toLowerCase();
@@ -446,7 +453,7 @@ const app = {
         return `${noteLetter}${accStr}${octave}${techStr}${CONFIG.AUDIO_FORMAT}`;
     },
 
-    async fetchAudioForSong(data) {
+    async fetchAssetsForSong(data) {
         this.audioBuffers = {};
         const uniqueBells = new Set();
         
@@ -468,11 +475,12 @@ const app = {
         const labelUI = document.getElementById('player-part-label');
         const originalText = labelUI ? labelUI.innerText : "Part ?";
         if (labelUI) {
-            labelUI.innerText = "Loading Audio...";
+            labelUI.innerText = "Loading Assets...";
             labelUI.style.color = "var(--manual)";
         }
 
-        const promises = Array.from(uniqueBells).map(async nKey => {
+        // 1. Fetch Audio
+        const audioPromises = Array.from(uniqueBells).map(async nKey => {
             const [pStr, acc, tech] = nKey.split('_');
             const fileName = this.getAudioFileName(parseInt(pStr), acc, tech);
             const safeFileName = fileName.split('/').map(encodeURIComponent).join('/');
@@ -491,13 +499,32 @@ const app = {
                     const arrayBuffer = await res.arrayBuffer();
                     const audioBuffer = await this.audioCtx.decodeAudioData(arrayBuffer);
                     this.audioBuffers[nKey] = audioBuffer;
+                } else {
+                    console.warn(`⚠️ MISSING AUDIO: Engine looked for "${safeFileName}" but it was not found in GitHub. Falling back to Synth.`);
                 }
             } catch(e) {
-                // Fails silently - will fall back to synth in playTone
+                console.warn(`⚠️ MISSING AUDIO: Engine looked for "${safeFileName}" but it was not found in GitHub. Falling back to Synth.`);
             }
         });
 
-        await Promise.all(promises);
+        // 2. Load Sheet Music Images for the Background
+        this.pageImages = {};
+        const imagePromises = [];
+        if (data.pages && Array.isArray(data.pages)) {
+            data.pages.forEach(p => {
+                imagePromises.push(new Promise((resolve) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        this.pageImages[p.id] = img;
+                        resolve();
+                    };
+                    img.onerror = () => resolve(); // fail silently if bad image
+                    img.src = p.src; // Uses the embedded base64
+                }));
+            });
+        }
+
+        await Promise.all([...audioPromises, ...imagePromises]);
         
         if (labelUI) {
             labelUI.innerText = originalText;
@@ -768,8 +795,8 @@ const app = {
         this.resizePlayerCanvas();
         this.compilePlaybackTimeline();
         
-        // Fetch all required MP3s
-        await this.fetchAudioForSong(this.playbackData);
+        // Fetch all required assets (MP3s + Sheet Music Images)
+        await this.fetchAssetsForSong(this.playbackData);
         
         const maxM = this.playerState.flatMeasures.length > 0 ? this.playerState.flatMeasures.length - 1 : 0;
         document.getElementById('player-loop-start').value = 0;
@@ -826,27 +853,37 @@ const app = {
         const mainBeats = safeBeats.filter(b => b.isMain).sort((a,b) => a.val - b.val);
         const mTsTop = m.tsTop || 4;
         
-        if (mainBeats.length === 0) return frac * mTsTop;
-        
-        const gridBeats = m.gridBeats || mTsTop;
-        const step = mTsTop / gridBeats;
+        let rawLogTime = frac * mTsTop;
+        let found = false;
 
-        for (let k = 0; k < mainBeats.length - 1; k++) {
-            if (frac >= mainBeats[k].val && frac <= mainBeats[k+1].val) {
-                let logicalStart = k * step;
-                let logicalEnd = (k+1) * step;
-                let pct = (frac - mainBeats[k].val) / (mainBeats[k+1].val - mainBeats[k].val);
-                return logicalStart + (pct * (logicalEnd - logicalStart));
+        if (mainBeats.length > 0) {
+            const gridBeats = m.gridBeats || mTsTop;
+            const step = mTsTop / gridBeats;
+
+            for (let k = 0; k < mainBeats.length - 1; k++) {
+                if (frac >= mainBeats[k].val && frac <= mainBeats[k+1].val) {
+                    let logicalStart = k * step;
+                    let logicalEnd = (k+1) * step;
+                    let pct = (frac - mainBeats[k].val) / (mainBeats[k+1].val - mainBeats[k].val);
+                    rawLogTime = logicalStart + (pct * (logicalEnd - logicalStart));
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                const lastIdx = mainBeats.length - 1;
+                if (frac >= mainBeats[lastIdx].val) {
+                    let logicalStart = lastIdx * step;
+                    let logicalEnd = mTsTop; 
+                    let pct = (frac - mainBeats[lastIdx].val) / (1.0 - mainBeats[lastIdx].val);
+                    rawLogTime = logicalStart + (pct * (logicalEnd - logicalStart));
+                }
             }
         }
-        const lastIdx = mainBeats.length - 1;
-        if (frac >= mainBeats[lastIdx].val) {
-            let logicalStart = lastIdx * step;
-            let logicalEnd = mTsTop; 
-            let pct = (frac - mainBeats[lastIdx].val) / (1.0 - mainBeats[lastIdx].val);
-            return logicalStart + (pct * (logicalEnd - logicalStart));
-        }
-        return 0;
+        
+        // Quantize to the nearest 1/24th of a beat (Fixes human click errors!)
+        // Perfectly snaps to 8ths, 16ths, 32nds, and exact Triplets
+        return Math.round(rawLogTime * 24) / 24;
     },
 
     getFracFromLogicalTime(m, logTime) {
@@ -893,18 +930,23 @@ const app = {
     },
 
     computeAutoDampen(startM, n, measureList) {
-        let remLen = n.length || 1;
+        let remLen = parseFloat(n.length) || 1;
         let cMIdx = measureList.indexOf(startM);
         let cLogTime = this.getLogicalTime(startM, n.time);
+        
+        // Tolerance for slight human clicking imperfections (0.15 beats)
+        const tolerance = 0.15; 
         
         while (remLen > 0.001 && cMIdx !== -1 && cMIdx < measureList.length) {
             const curM = measureList[cMIdx];
             let logAvail = (curM.tsTop || 4) - cLogTime;
             let logConsume = Math.min(remLen, logAvail);
             let endLogTime = cLogTime + logConsume;
-            let reachingNextDownbeat = (Math.abs(remLen - logAvail) < 0.001);
             
-            if (remLen <= logAvail + 0.001) {
+            // Check if note reaches within tolerance of the end of the measure
+            let reachingNextDownbeat = (Math.abs(remLen - logAvail) <= tolerance);
+            
+            if (remLen <= logAvail + tolerance) {
                 let targetMIdx = cMIdx;
                 let targetFrac = 0;
                 
@@ -922,8 +964,10 @@ const app = {
                     if (targetM.notes) {
                         for (let nn of targetM.notes) {
                             if (nn === n) continue; 
-                            if (nn.pitch === n.pitch && nn.half === n.half) {
-                                if (Math.abs(nn.time - targetFrac) < 0.05) return false; 
+                            // Match the exact bell, regardless of which staff half it was mapped on
+                            if (nn.pitch === n.pitch) {
+                                // Added leniency to the visual snap check as well
+                                if (Math.abs(nn.time - targetFrac) <= 0.08) return false; 
                             }
                         }
                     }
@@ -957,7 +1001,7 @@ const app = {
             
             this.playerState.flatMeasures.push({
                 beatStart: currentAbsBeat, beatEnd: currentAbsBeat + m0Top,
-                tsTop: m0Top, bpm: startBpm
+                tsTop: m0Top, bpm: startBpm, isCountIn: true
             });
             
             const metroBeats = firstM.metronomeBeats || Array.from({length: m0Top}, (_, i) => i + 1);
@@ -982,7 +1026,7 @@ const app = {
 
             this.playerState.flatMeasures.push({
                 beatStart: currentAbsBeat, beatEnd: currentAbsBeat + mTsTop,
-                tsTop: mTsTop, bpm: mBpm
+                tsTop: mTsTop, bpm: mBpm, rawMeasure: m, isCountIn: false
             });
 
             const metroBeats = m.metronomeBeats || Array.from({length: mTsTop}, (_, i) => i + 1);
@@ -1125,6 +1169,23 @@ const app = {
         const padding = 80; const usableHeight = this.playerCanvas.height - (padding * 2);
         const offsetFromCenter = pitch - playerCenter; const pct = 0.5 + (offsetFromCenter / range);
         return padding + (usableHeight * (1 - pct)); 
+    },
+    
+    // Mathematically calculates exactly which row of pixels corresponds to a given pitch on the original sheet music
+    getSourceYForPitch(m, pitch) {
+        const staff = m.staff || { trebleBottom: 0.4, bassTop: 0.6 };
+        const midPitch = 24; 
+        const half = pitch >= midPitch ? 'top' : 'bottom';
+        const clef = m.clefs ? m.clefs[half] : (half === 'top' ? 'treble' : 'bass'); 
+        
+        let yTop, yBottom;
+        if (half === 'top') { yTop = m.y; yBottom = m.y + (m.h * staff.trebleBottom); }
+        else { yTop = m.y + (m.h * staff.bassTop); yBottom = m.y + m.h; }
+        
+        const pixelsPerStep = (yBottom - yTop) / 8;
+        const bottomPitchRef = (clef === 'treble') ? 30 : 18;
+        
+        return yBottom - ((pitch - bottomPitchRef) * pixelsPerStep);
     },
 
     pausePlayer() {
@@ -1504,7 +1565,8 @@ const app = {
         const strikeLineX = 150, currentB = this.playerState.currentBeat;
         const ppB = this.playerState.pixelsPerBeat / this.playerState.tempoMultiplier;
         
-        ctx.strokeStyle = "#333"; ctx.lineWidth = 2;
+        // 1. Draw Faint Horizontal Pitch Grid Lines
+        ctx.strokeStyle = "rgba(51, 51, 51, 0.4)"; ctx.lineWidth = 1;
         for (let p = this.playerState.minPitch; p <= this.playerState.maxPitch; p++) {
             if (p % 2 === 0) { 
                 const y = this.getPlayerPitchY(p);
@@ -1512,6 +1574,137 @@ const app = {
             }
         }
 
+        // 2. Draw Dynamic Background Sheet Music Images
+        if (this.playerState.showSheetMusic) {
+            this.playerState.flatMeasures.forEach((fm, idx) => {
+                if (fm.isCountIn) return; // Don't draw image for count-in measure
+            const sX = strikeLineX + ((fm.beatStart - currentB) * ppB);
+            const eX = strikeLineX + ((fm.beatEnd - currentB) * ppB);
+            
+            // Only draw if it's visible on the screen
+            if (eX < -50 || sX > width + 50) return; 
+            
+            if (fm.rawMeasure && fm.rawMeasure.pageId && this.pageImages && this.pageImages[fm.rawMeasure.pageId]) {
+                const m = fm.rawMeasure;
+                const img = this.pageImages[m.pageId];
+                
+                const staff = m.staff || { trebleBottom: 0.4, bassTop: 0.6 };
+                const clefTop = m.clefs ? m.clefs['top'] : 'treble';
+                const clefBot = m.clefs ? m.clefs['bottom'] : 'bass';
+
+                // Pitch constants for the physical lines you traced
+                const p_y0 = (clefTop === 'treble') ? 38 : 26; // Top line
+                const p_y1 = (clefTop === 'treble') ? 30 : 18; // Bottom line
+                const p_y2 = (clefBot === 'treble') ? 38 : 26;
+                const p_y3 = (clefBot === 'treble') ? 30 : 18;
+
+                // Physical Y coordinates on the image
+                const y0 = m.y;
+                const y1 = m.y + m.h * staff.trebleBottom;
+                const y2 = m.y + m.h * staff.bassTop;
+                const y3 = m.y + m.h;
+
+                // How many pixels does 1 pitch take up physically?
+                const pxPerPitch_Top = (y1 - y0) / 8;
+                const pxPerPitch_Bot = (y3 - y2) / 8;
+
+                // How far out do we want to search for ledger lines?
+                const pMax = 55; // Up to G7
+                const pMin = 0;  // Down to C0
+
+                // Calculate extrapolated top bounds
+                let sTopY = y0 - ((pMax - p_y0) * pxPerPitch_Top);
+                let dTopY = this.getPlayerPitchY(pMax);
+                const destY_y1 = this.getPlayerPitchY(p_y1);
+
+                // Prevent the engine from pulling pixels from above the actual image
+                if (sTopY < 0) {
+                    const excessPitches = (0 - sTopY) / pxPerPitch_Top;
+                    sTopY = 0;
+                    dTopY = this.getPlayerPitchY(pMax - excessPitches);
+                }
+
+                // Calculate extrapolated bottom bounds
+                const destY_y2 = this.getPlayerPitchY(p_y2);
+                let sBotY = y3 + ((p_y3 - pMin) * pxPerPitch_Bot);
+                let dBotY = this.getPlayerPitchY(pMin);
+
+                // Prevent the engine from pulling pixels below the actual image
+                if (sBotY > img.height) {
+                    const excessPitches = (sBotY - img.height) / pxPerPitch_Bot;
+                    sBotY = img.height;
+                    dBotY = this.getPlayerPitchY(pMin + excessPitches);
+                }
+
+                // Create Horizontal Slices (Anchors) based on the mapped beats
+                const gridBeats = m.gridBeats || m.tsTop;
+                const step = m.tsTop / gridBeats;
+                const mainBeats = (m.beats || []).filter(b => b.isMain).sort((a,b) => a.val - b.val);
+                
+                let anchors = [];
+                if (mainBeats.length === 0) {
+                    anchors.push({ imgX: m.x, logT: 0 });
+                    anchors.push({ imgX: m.x + m.w, logT: m.tsTop });
+                } else {
+                    let padFrac = mainBeats[0].val;
+                    let firstScale = mainBeats.length > 1 ? (mainBeats[1].val - mainBeats[0].val) : 1;
+                    if (firstScale <= 0) firstScale = 1;
+                    let leftLogT = 0 - (padFrac / firstScale) * step;
+                    
+                    // Cap the negative stretch so a huge gap before Beat 1 doesn't stretch into infinity
+                    leftLogT = Math.max(leftLogT, -step * 1.5); 
+                    
+                    anchors.push({ imgX: m.x, logT: leftLogT });
+                    for (let k = 0; k < mainBeats.length; k++) {
+                        anchors.push({ imgX: m.x + m.w * mainBeats[k].val, logT: k * step });
+                    }
+                    anchors.push({ imgX: m.x + m.w, logT: m.tsTop });
+                }
+
+                ctx.save();
+                // Applies Dark Mode visually to the raw white paper!
+                ctx.filter = 'invert(1) opacity(0.35) contrast(1.2)'; 
+
+                // Iterate over every horizontal slice and stretch it into place
+                for (let i = 0; i < anchors.length - 1; i++) {
+                    const a1 = anchors[i];
+                    const a2 = anchors[i+1];
+                    
+                    if (a2.imgX - a1.imgX <= 0) continue; // Skip zero-width physical slices
+                    
+                    const slice_sX = strikeLineX + ((fm.beatStart + a1.logT - currentB) * ppB);
+                    const slice_eX = strikeLineX + ((fm.beatStart + a2.logT - currentB) * ppB);
+                    
+                    if (slice_eX < -50 || slice_sX > width + 50) continue; 
+                    if (slice_eX - slice_sX <= 0) continue; // Skip zero-width logical slices
+
+                    // 1. Draw Top Section (Ledger lines above + Treble Staff)
+                    if (y1 > sTopY && destY_y1 > dTopY) {
+                        ctx.drawImage(img, 
+                            a1.imgX, sTopY, a2.imgX - a1.imgX, y1 - sTopY, 
+                            slice_sX, dTopY, slice_eX - slice_sX, destY_y1 - dTopY);
+                    }
+                    
+                    // 2. Draw Middle Gap
+                    if (y2 > y1 && destY_y2 > destY_y1) {
+                        ctx.drawImage(img, 
+                            a1.imgX, y1, a2.imgX - a1.imgX, y2 - y1, 
+                            slice_sX, destY_y1, slice_eX - slice_sX, destY_y2 - destY_y1);
+                    }
+                    
+                    // 3. Draw Bottom Section (Bass Staff + Ledger lines below)
+                    if (sBotY > y2 && dBotY > destY_y2) {
+                        ctx.drawImage(img, 
+                            a1.imgX, y2, a2.imgX - a1.imgX, sBotY - y2, 
+                            slice_sX, destY_y2, slice_eX - slice_sX, dBotY - destY_y2);
+                    }
+                }
+                ctx.restore();
+            }
+        });
+        }
+
+        // 3. Draw Green Loop Background Box
         if (this.playerState.isLooping && this.playerState.flatMeasures.length > 0) {
             let startIdx = this.playerState.loopStartMeasure;
             let endIdx = this.playerState.loopEndMeasure;
@@ -1558,7 +1751,7 @@ const app = {
                 ctx.moveTo(lineX, 0); ctx.lineTo(lineX, height); ctx.stroke();
                 ctx.fillStyle = "#bdc3c7"; ctx.font = "14px Arial"; ctx.textAlign = "left";
                 
-                const label = idx === 0 ? "Count-In" : `Measure ${idx}`;
+                const label = fm.isCountIn ? "Count-In" : `Measure ${idx}`;
                 ctx.fillText(label, lineX + 10, 30);
             }
         });
@@ -1578,7 +1771,7 @@ const app = {
                 ctx.fillRect(nStartX, nY - 4, nEndX - nStartX, 8);
             }
             
-            ctx.fillStyle = this.hexToRgba(n.color, 0.3); ctx.beginPath(); ctx.arc(nStartX, nY, 6, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = this.hexToRgba(n.color, 0.2); ctx.beginPath(); ctx.arc(nStartX, nY, 6, 0, Math.PI*2); ctx.fill();
         });
 
         playerNotes.forEach(n => {
@@ -1593,8 +1786,8 @@ const app = {
             
             if (n.hit) {
                 if (n.dampen) {
-                    if (!n.dampenedOff) { baseColor = "#fff"; barAlpha = 0.8; } 
-                    else { baseColor = "#2ecc71"; barAlpha = 0.3; }
+                    if (!n.dampenedOff) { baseColor = "#fff"; barAlpha = 0.65; } 
+                    else { baseColor = "#2ecc71"; barAlpha = 0.2; }
                 } else { baseColor = "#2ecc71"; barAlpha = 0.0; }
             } else if (n.missed) { baseColor = "var(--accent)"; }
             
@@ -1604,8 +1797,10 @@ const app = {
                 ctx.fillRect(nStartX, nY - 8, nEndX - nStartX, 16);
             }
             
-            ctx.fillStyle = baseColor; ctx.beginPath(); ctx.arc(nStartX, nY, 12, 0, Math.PI*2); ctx.fill();
-            ctx.strokeStyle = "#111"; ctx.lineWidth = 2; ctx.stroke();
+            // Draw slightly transparent note bubble
+            ctx.fillStyle = this.hexToRgba(baseColor, 0.85); 
+            ctx.beginPath(); ctx.arc(nStartX, nY, 12, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = "rgba(17, 17, 17, 0.85)"; ctx.lineWidth = 2; ctx.stroke();
             
             if (n.dampen) {
                 ctx.beginPath(); ctx.strokeStyle = this.hexToRgba(baseColor, 0.9); ctx.lineWidth = 4;
