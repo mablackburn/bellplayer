@@ -1,0 +1,2286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Virtual Ringer - Bell Choir Platform</title>
+    <style>
+        :root {
+            --primary: #2c3e50; --accent: #e74c3c; --bg: #ecf0f1;
+            --sidebar: #1a252f; --text: #ecf0f1; --success: #2ecc71;
+            --panel: #2c3e50; --info: #3498db; --beat: #9b59b6;
+            --manual: #f39c12; --note: #27ae60;
+        }
+
+        body, html {
+            margin: 0; padding: 0; height: 100vh; overflow: hidden; user-select: none;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: #111; color: var(--text);
+        }
+
+        #app-root { display: flex; flex-direction: column; height: 100vh; }
+
+        #top-nav {
+            background: var(--primary); color: white; padding: 10px 20px;
+            display: flex; justify-content: space-between; align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3); z-index: 100;
+        }
+
+        #state-toolbar, #player-toolbar {
+            background: var(--sidebar); padding: 8px 15px;
+            display: none; gap: 15px; align-items: center;
+            border-bottom: 1px solid #34495e;
+        }
+        
+        #player-toolbar { border-top: 1px solid #444; border-bottom: none; padding: 15px 25px; box-shadow: 0 -5px 15px rgba(0,0,0,0.5); z-index: 100; flex-wrap: wrap; justify-content: center; }
+
+        .state-btn, .ctrl-btn {
+            background: #34495e; border: none; color: #bdc3c7;
+            padding: 8px 15px; border-radius: 4px; cursor: pointer;
+            font-size: 0.9em; transition: all 0.2s; font-weight: bold;
+        }
+        .state-btn.active { background: var(--accent); color: white; }
+        .ctrl-btn { color: white; font-size: 1.1em; }
+        .ctrl-btn:hover, .state-btn:hover { background: #455a64; }
+        .ctrl-btn.play { background: var(--success); color: #111; min-width: 120px; }
+        .ctrl-btn.stop { background: var(--accent); }
+
+        .zoom-controls { display: flex; align-items: center; gap: 5px; margin-left: 20px; border-left: 1px solid #444; padding-left: 20px; }
+
+        #editor-layout, #player-layout { display: none; flex-grow: 1; overflow: hidden; position: relative; }
+        #player-layout { background: #000; flex-direction: column; }
+        
+        #sidebar-thumbnails {
+            width: 160px; background: #1a252f; border-right: 1px solid #444;
+            display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden;
+            transition: width 0.3s, opacity 0.3s; z-index: 40;
+        }
+        #sidebar-thumbnails.collapsed { width: 0; border: none; opacity: 0; pointer-events: none; }
+        
+        .thumb-wrap { padding: 10px; text-align: center; border-bottom: 1px solid #333; cursor: pointer; opacity: 0.5; transition: opacity 0.2s; }
+        .thumb-wrap:hover { opacity: 0.8; }
+        .thumb-wrap.active { opacity: 1; background: #2c3e50; border-left: 4px solid var(--info); }
+        .thumb-wrap img { max-width: 100%; border: 1px solid #000; pointer-events: none; }
+        .thumb-label { font-size: 0.75em; margin-top: 5px; color: #bdc3c7; word-break: break-all; }
+
+        #canvas-viewport, #player-viewport { flex-grow: 1; overflow: hidden; background: #111; position: relative; cursor: crosshair; }
+        #canvas-viewport.panning { cursor: grab; }
+        #canvas-viewport.panning:active { cursor: grabbing; }
+
+        canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+        #main-canvas { background: white; box-shadow: 0 0 50px rgba(0,0,0,0.8); }
+        #player-canvas { background: transparent; width: 100%; height: 100%; cursor: default; }
+
+        #inspector {
+            width: 280px; background: var(--panel); border-left: 1px solid #444;
+            padding: 20px; display: flex; flex-direction: column; gap: 20px;
+            z-index: 50; overflow-y: auto; flex-shrink: 0;
+        }
+
+        .inspector-group { display: flex; flex-direction: column; gap: 8px; }
+        .inspector-group label { font-size: 0.8em; color: #bdc3c7; text-transform: uppercase; }
+        .inspector-group select, .inspector-group input[type="number"], .inspector-group input[type="text"] {
+            background: #1a252f; border: 1px solid #444; color: white; padding: 8px; border-radius: 4px; outline: none;
+        }
+
+        .add-btn { background: var(--success); border: none; color: #111; border-radius: 3px; font-weight: bold; cursor: pointer; padding: 2px 8px; font-size: 0.8em; }
+
+        #hud-overlay {
+            position: absolute; bottom: 20px; left: 20px; background: rgba(0,0,0,0.85); color: white;
+            padding: 15px; border-radius: 10px; width: 300px; font-size: 0.85em; pointer-events: none; z-index: 50;
+        }
+
+        #parts-workspace { flex-grow: 1; background: var(--sidebar); padding: 30px; overflow-y: auto; width: 100%; display: flex; flex-direction: column; }
+
+        #main-menu { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 20px; background: var(--bg); color: var(--primary); }
+        .card-container { display: flex; gap: 30px; }
+        .card { background: white; width: 280px; padding: 40px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center; cursor: pointer; transition: transform 0.2s; }
+        .card:hover { transform: translateY(-5px); }
+
+        .btn-standard { background: var(--accent); color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 10px;}
+        .hidden { display: none !important; }
+        
+        .modal-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); display: flex; justify-content: center; align-items: center; z-index: 200; }
+        .modal-content { background: var(--panel); padding: 30px; border-radius: 10px; width: 450px; box-shadow: 0 10px 40px rgba(0,0,0,0.8); }
+        .ts-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 5px; }
+        .ts-btn { background: #1a252f; border: 1px solid #444; color: white; padding: 8px; border-radius: 4px; cursor: pointer; font-weight: bold; text-align: center; }
+        .ts-btn:hover { background: #34495e; }
+        .ts-btn.active { background: var(--accent); border-color: var(--accent); }
+        
+        #inspector-resizer {
+            width: 6px; background: #1a252f; cursor: ew-resize;
+            border-left: 1px solid #444; z-index: 50; transition: background 0.2s;
+        }
+        #inspector-resizer:hover, #inspector-resizer.dragging { background: var(--info); }
+        
+        .toolbar-section {
+            display: flex; align-items: center; gap: 15px; background: #151e27; padding: 10px 15px; border-radius: 8px; border: 1px solid #2c3e50;
+        }
+        .toolbar-section.transparent { background: transparent; border: none; padding: 0; }
+        
+        .slider-group { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; }
+        .slider-group label { color: #bdc3c7; font-size: 0.7em; text-transform: uppercase; font-weight: bold; }
+        .slider-group input[type=range] { width: 100px; cursor: pointer; accent-color: var(--info); }
+
+        /* Touch Controls */
+        #touch-controls {
+            display: flex; justify-content: center; gap: 15px; padding: 20px;
+            background: #1a252f; border-top: 1px solid #444; box-shadow: 0 -5px 15px rgba(0,0,0,0.5);
+            min-height: 80px; z-index: 100;
+        }
+        .touch-bell-btn {
+            flex: 1; max-width: 120px; height: 80px; border-radius: 12px;
+            border: 2px solid; font-size: 1.5em; font-weight: bold; color: white;
+            cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            transition: transform 0.1s, background 0.1s, box-shadow 0.1s;
+            user-select: none; -webkit-user-select: none; touch-action: manipulation;
+        }
+        .touch-bell-btn:active, .touch-bell-btn.active { transform: translateY(4px); }
+        .touch-bell-btn .bell-key { font-size: 0.5em; opacity: 0.7; margin-top: 5px; }
+        
+        /* HUD Score Overlay */
+        #score-overlay {
+            position: absolute; bottom: 20px; left: 20px;
+            background: rgba(26, 37, 47, 0.85); padding: 15px 25px;
+            border-radius: 12px; border: 2px solid #34495e;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.8); z-index: 50;
+            display: flex; flex-direction: column; align-items: flex-start; gap: 5px;
+            pointer-events: none; backdrop-filter: blur(4px);
+        }
+        #overlay-score-main { font-size: 3em; font-weight: bold; color: var(--success); line-height: 1; margin: 0; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+        #overlay-score-label { font-size: 0.9em; font-weight: bold; color: #bdc3c7; text-transform: uppercase; letter-spacing: 1px; }
+        #overlay-score-prev { font-size: 1.1em; color: var(--info); font-weight: bold; display: none; background: rgba(0,0,0,0.3); padding: 5px 10px; border-radius: 4px; margin-top: 5px;}
+
+        /* Pause Screen Overlay */
+        #pause-overlay {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.75); backdrop-filter: blur(8px);
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 60; color: white; transition: opacity 0.3s;
+        }
+        .loop-history-box {
+            background: var(--sidebar); padding: 25px; border-radius: 12px;
+            margin-top: 20px; min-width: 300px; max-height: 50vh; overflow-y: auto;
+            border: 1px solid #444; box-shadow: 0 15px 40px rgba(0,0,0,0.8);
+        }
+        .loop-entry { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #333; font-size: 1.2em; }
+        .loop-entry:last-child { border-bottom: none; }
+    </style>
+</head>
+<body>
+
+<div id="app-root">
+    <!-- Setup Modals -->
+    <div id="setup-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h2 style="margin-top:0; color:var(--accent)">Song Setup Defaults</h2>
+            <div style="display: flex; gap: 15px; margin-bottom: 15px;">
+                <div class="inspector-group" style="flex: 1;"><label>Default Tempo</label><input type="number" id="setup-bpm" value="120"></div>
+                <div class="inspector-group" style="flex: 1;"><label>Beat Value</label><select id="setup-beat-val"><option value="4">Quarter (4)</option><option value="8">Eighth (8)</option></select></div>
+            </div>
+            <div class="inspector-group" style="margin-bottom: 15px;"><label>Time Signatures</label><input type="text" id="setup-ts" value="4/4, 3/4, 6/8, 2/4"></div>
+            <div class="inspector-group" style="margin-bottom: 25px;"><label>Keys</label><div id="setup-key-grid" class="ts-grid" style="grid-template-columns: repeat(5, 1fr);"></div></div>
+            <button class="btn-standard" onclick="app.startEditor()">Start Mapping</button>
+            <button class="btn-standard" style="background: #7f8c8d; margin-top: 10px;" onclick="document.getElementById('setup-modal').classList.add('hidden')">Cancel</button>
+        </div>
+    </div>
+    
+    <!-- Custom Modals replacing native prompt/alert -->
+    <div id="custom-prompt-modal" class="modal-overlay hidden" style="z-index: 300;">
+        <div class="modal-content" style="width: 350px; text-align: center;">
+            <h3 id="custom-prompt-msg" style="margin-top: 0; color: var(--info);"></h3>
+            <input type="text" id="custom-prompt-input" style="width: 100%; padding: 10px; margin-bottom: 20px; background: #1a252f; border: 1px solid #444; color: white; border-radius: 4px; box-sizing: border-box; font-size: 1.2em; text-align: center;">
+            <div style="display: flex; gap: 10px;">
+                <button class="btn-standard" style="background: #7f8c8d; margin-top: 0;" onclick="app.closeCustomPrompt()">Cancel</button>
+                <button class="btn-standard" style="background: var(--success); color: #111; margin-top: 0;" onclick="app.submitCustomPrompt()">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="custom-alert-modal" class="modal-overlay hidden" style="z-index: 300;">
+        <div class="modal-content" style="width: 350px; text-align: center;">
+            <h3 style="margin-top: 0; color: var(--accent);">Notice</h3>
+            <p id="custom-alert-msg" style="color: white; margin-bottom: 20px;"></p>
+            <button class="btn-standard" style="margin-top: 0;" onclick="document.getElementById('custom-alert-modal').classList.add('hidden')">OK</button>
+        </div>
+    </div>
+
+    <!-- Navigation -->
+    <nav id="top-nav">
+        <div style="font-weight: bold; font-size: 1.2em;">🔔 The Virtual Ringer <span style="font-size: 0.8em; color: #bdc3c7;">(Director Workshop)</span> <span id="save-status" style="font-size: 0.75em; color: var(--success); opacity: 0; transition: opacity 0.5s;">Saving...</span></div>
+        <button id="exit-to-menu" class="state-btn hidden" onclick="app.showMenu()">Exit to Menu</button>
+    </nav>
+
+    <!-- Main Menu -->
+    <div id="main-menu">
+        <h1>Virtual Ringer <span style="color:var(--accent)">Director Workshop</span></h1>
+        <p style="color: #bdc3c7; margin-top: -10px; margin-bottom: 30px;">Map sheet music, assign parts, and export .ringer files for your choir.</p>
+        <div class="card-container">
+            <div class="card" onclick="app.showSetup()">
+                <h2>Start New Map</h2><button class="btn-standard">Setup Project</button>
+            </div>
+            <div class="card hidden" id="btn-continue-project" onclick="app.continueProject()">
+                <h2>Continue Work</h2><button class="btn-standard" style="background: var(--success); color: #111;">Resume Mapping</button>
+            </div>
+            <div class="card" onclick="window.open('player.html', '_blank')">
+                <h2 style="color: var(--info)">Practice Room</h2>
+                <button class="btn-standard" style="background: var(--info);">Open Player (New Tab)</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Editor Toolbar -->
+    <div id="state-toolbar">
+        <button class="state-btn" onclick="app.toggleSidebar()">☰ Pages</button>
+        <div style="display: flex; gap: 5px; border-right: 1px solid #444; padding-right: 15px;">
+            <button id="tab-measures" class="state-btn active" onclick="app.setPhase('MEASURES')">1. Measures</button>
+            <button id="tab-beats" class="state-btn" onclick="app.setPhase('BEATS')">2. Beats</button>
+            <button id="tab-notes" class="state-btn" onclick="app.setPhase('NOTES')">3. Notes</button>
+            <button id="tab-parts" class="state-btn" onclick="app.setPhase('PARTS')">4. Parts</button>
+        </div>
+        <div class="zoom-controls" id="main-zoom-controls">
+            <button class="state-btn" onclick="app.adjustZoom(-0.1)">-</button>
+            <span id="zoom-display" style="min-width: 50px; text-align: center;">100%</span>
+            <button class="state-btn" onclick="app.adjustZoom(0.1)">+</button>
+            <button class="state-btn" style="margin-left:10px" onclick="app.resetView()">Reset</button>
+        </div>
+        <div style="margin-left: auto; display: flex; gap: 10px;">
+            <button class="state-btn" onclick="app.exportProject()" style="color: var(--success);">💾 Save .ringer</button>
+            <input type="file" id="project-loader" style="display:none" accept=".ringer,.json" onchange="app.importProject(event)">
+            <button class="state-btn" onclick="document.getElementById('project-loader').click()" style="color: var(--info);">📂 Open .ringer</button>
+            <input type="file" id="image-loader" style="display:none" accept="image/*" multiple>
+            <button class="state-btn" onclick="document.getElementById('image-loader').click()" style="background: var(--note); color: white;">+ Load Sheet Music</button>
+        </div>
+    </div>
+
+    <!-- Editor Layout -->
+    <div id="editor-layout">
+        <div id="sidebar-thumbnails"><div id="thumbnail-list"></div></div>
+        
+        <div id="canvas-viewport">
+            <canvas id="main-canvas"></canvas>
+            <div id="hud-overlay">
+                <div id="hud-main">
+                    <strong style="color: var(--accent)" id="hud-phase-title">WORKSHOP: MEASURE MAPPING</strong><br>
+                    <div id="hud-measure-controls">
+                        • <b>Map:</b> Top-left of measure to Bottom-right.<br>
+                        • <b>Quick Add:</b> Click the <span style="color:var(--success); font-weight:bold">[+]</span> next to active measure.<br>
+                        • <b>Resize:</b> Select measure, drag Right or Bottom edge.<br>
+                    </div>
+                    <div id="hud-beat-controls" class="hidden">
+                        • <b style="color:var(--beat)">Calibrate:</b> Drag purple lines to align.<br>
+                        • <b style="color:var(--manual)">Orange Handles:</b> Indicates a manually locked beat.<br>
+                        • <b>Subdivide:</b> Hover exactly between two beats to add a subdivision.
+                    </div>
+                    <div id="hud-note-controls" class="hidden">
+                        • <b style="color:var(--note)">Select Zone:</b> Click top or bottom of a measure.<br>
+                        • <b>Snap & Click:</b> Hover near beat lines to place a note.<br>
+                        • <b>Select & Edit:</b> Click an existing note to edit it.<br>
+                        • <b style="color:var(--note)">Shortcuts:</b> Acc = <b>S/F/N/A</b> | Len = <b>W/H/Q/E/X</b> | Tech = <b>R/L/M/K/P</b> | Toggle Damp = <b>D</b>
+                    </div>
+                    • <b>Pan:</b> Right-Click drag or Space+Drag.
+                </div>
+            </div>
+        </div>
+        
+        <div id="parts-workspace" class="hidden">
+            <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px; max-width: 800px; margin: 0 auto; width: 100%;">
+                <div><h2 style="color: var(--accent); margin-top: 0; font-size: 2em; margin-bottom: 5px;">Choir Assignments</h2></div>
+                <div style="display: flex; align-items: center; gap: 15px; background: #2c3e50; padding: 15px; border-radius: 8px;">
+                    <label style="color: white; font-weight: bold;">Total Parts:</label>
+                    <input type="number" id="parts-num-input" min="1" max="25" value="13" onchange="app.updateNumParts()">
+                    <button class="add-btn" onclick="app.computeAssignments(null, true)">Reset Defaults</button>
+                </div>
+            </div>
+            
+            <div style="max-width: 800px; margin: 0 auto; width: 100%;">
+                <h3 style="color: var(--info); margin-bottom: 10px; font-size: 1.2em;">Ringer Names (Optional)</h3>
+                <div id="part-names-container" style="margin-bottom: 25px; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px;"></div>
+            </div>
+
+            <div id="parts-grid" style="display: flex; flex-direction: column; gap: 10px; max-width: 800px; margin: 0 auto; padding-bottom: 50px; width: 100%;"></div>
+        </div>
+
+        <div id="inspector-resizer"></div>
+        <div id="inspector">
+            <h3 id="inspector-title" style="margin-top:0">Selection: None</h3>
+            <div id="inspector-content" class="hidden">
+                <div id="measure-meta">
+                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                        <div class="inspector-group" style="flex: 1;"><label>Measure #</label><input type="number" id="ins-num" readonly></div>
+                        <div class="inspector-group" style="flex: 1;"><label>Tempo</label><input type="number" id="ins-bpm"></div>
+                    </div>
+                    <div class="inspector-group"><div style="display: flex; justify-content: space-between;"><label>Time Signature</label><button class="add-btn" onclick="app.promptAddTS()">+</button></div><div id="ins-ts-grid" class="ts-grid"></div></div>
+                    <div class="inspector-group" style="margin-top: 10px;"><div style="display: flex; justify-content: space-between;"><label>Key Signature</label><button class="add-btn" onclick="app.promptAddKey()">+</button></div><div id="ins-key-grid" class="ts-grid" style="grid-template-columns: repeat(4, 1fr);"></div></div>
+                    <div class="inspector-group" style="margin-top: 10px;"><label>Metronome</label><div id="ins-metronome-grid" class="ts-grid" style="grid-template-columns: repeat(auto-fill, minmax(30px, 1fr));"></div></div>
+                </div>
+
+                <div id="staff-controls-panel" class="hidden">
+                    <button id="btn-toggle-staff" class="state-btn" style="width: 100%;" onclick="app.toggleStaffEditing()">Edit Staff Anchors</button>
+                </div>
+                
+                <div id="beat-controls-panel" class="hidden">
+                    <div class="inspector-group" style="margin-bottom: 15px;">
+                        <label>Subdivide Gap By</label>
+                        <select id="ins-subdivide">
+                            <option value="2">2 (Eighths)</option>
+                            <option value="3">3 (Triplets)</option>
+                            <option value="4">4 (Sixteenths)</option>
+                            <option value="5">5 (Quintuplets)</option>
+                            <option value="6">6 (Sextuplets)</option>
+                        </select>
+                    </div>
+                    <button class="state-btn" style="width: 100%;" onclick="app.resetBeatSpacing()">Reset Proportional Spacing</button>
+                </div>
+
+                <div id="note-controls-panel" class="hidden">
+                    <label id="note-panel-title" style="font-size: 0.8em; color: var(--note); font-weight: bold; display: block; margin-bottom: 10px;">NOTE DEFAULTS</label>
+                    <div class="inspector-group" style="margin-bottom: 10px;"><label>Clef Type</label><select id="ins-clef-type" onchange="app.updateClefType(this.value)"><option value="treble">Treble Clef</option><option value="bass">Bass Clef</option></select></div>
+                    <div class="inspector-group" style="margin-bottom: 10px;"><label>Accidental</label><div id="ins-accidental-grid" class="ts-grid" style="grid-template-columns: repeat(4, 1fr);"></div></div>
+                    <div class="inspector-group" style="margin-bottom: 10px;">
+                        <label>Technique</label>
+                        <select id="ins-note-tech" onchange="app.updateNoteAttr('technique', this.value)">
+                            <!-- Populated Dynamically -->
+                        </select>
+                    </div>
+                    <div class="inspector-group" style="margin-bottom: 10px;"><label>Length (Beats)</label><input type="number" step="0.25" min="0.125" id="ins-note-length" onchange="app.updateNoteAttr('length', this.value)"></div>
+                    <div class="inspector-group hidden" id="dampen-container" style="margin-bottom: 10px; background: #1a252f; padding: 8px; border-radius: 4px;"><label style="display: flex; align-items: center; gap: 10px;"><input type="checkbox" id="ins-note-dampen" onchange="app.updateNoteAttr('dampen', this.checked)"> Dampen at End</label><div style="font-size: 0.7em; color: #7f8c8d; text-align: right;" id="dampen-status-text">Auto-Detected</div></div>
+                    <div class="inspector-group" style="margin-bottom: 10px;"><label>Part Override</label><select id="ins-note-override" onchange="app.updateNoteAttr('partOverride', this.value)"><option value="none">None</option></select></div>
+                    <button id="btn-delete-note" class="state-btn hidden" style="width: 100%; margin-top: 15px; background: #c0392b; color: white;" onclick="app.deleteSelectedNote()">Delete Note</button>
+                    <button class="btn-standard" style="width: 100%; background: var(--success); color: #111;" onclick="app.exitNoteZone()">Done Editing Staff</button>
+                </div>
+                
+                <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
+                <button id="btn-delete-measure" class="state-btn" style="background: #c0392b; width: 100%;" onclick="app.deleteSelected()">Delete Measure</button>
+            </div>
+            <div id="inspector-empty" style="color: #666; font-style: italic;">Select a measure or zone to edit.</div>
+        </div>
+    </div> 
+
+    <!-- Player Interface -->
+    <div id="player-layout">
+        <div id="player-toolbar">
+            <div class="toolbar-section">
+                <button class="ctrl-btn" style="background: #7f8c8d; font-size: 0.9em; padding: 8px 12px;" onclick="app.showPartSelector()">⬅ Parts</button>
+                <span style="font-weight:bold; color: var(--info); font-size: 1.2em; text-align: center; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" id="player-part-label">Part ?</span>
+            </div>
+            
+            <div class="toolbar-section">
+                <div class="slider-group" style="position: relative;">
+                    <label>Tempo (%)</label>
+                    <input type="range" id="player-tempo-zoom" min="50" max="150" step="5" value="100" list="tempo-marks" oninput="app.updatePlayerZoom('tempo', this.value)">
+                    <datalist id="tempo-marks">
+                        <option value="50" label="50"></option>
+                        <option value="75"></option>
+                        <option value="100" label="100"></option>
+                        <option value="125"></option>
+                        <option value="150" label="150"></option>
+                    </datalist>
+                </div>
+                <div class="slider-group">
+                    <label>Time Spread</label>
+                    <input type="range" id="player-time-zoom" min="50" max="600" value="250" oninput="app.updatePlayerZoom('time', this.value)">
+                </div>
+                <div class="slider-group">
+                    <label>Pitch Zoom</label>
+                    <input type="range" id="player-pitch-zoom" min="0.5" max="4.0" step="0.1" value="1.0" oninput="app.updatePlayerZoom('pitch', this.value)">
+                </div>
+                <div class="slider-group">
+                    <label>Choir Vol</label>
+                    <input type="range" id="player-choir-vol" min="0" max="100" value="40" oninput="app.updatePlayerZoom('choirVol', this.value)">
+                </div>
+            </div>
+
+            <div class="toolbar-section">
+                <div style="display: flex; flex-direction: column; gap: 5px;">
+                    <label style="color: #bdc3c7; font-size: 0.8em; font-weight: bold; display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                        <input type="checkbox" id="player-metronome-toggle" checked onchange="app.updateMetronomeState()"> Metronome
+                    </label>
+                    <input type="range" id="player-metronome-vol" min="0" max="300" value="100" oninput="app.updatePlayerZoom('metronomeVol', this.value)" style="width: 80px; accent-color: var(--info);" title="Metronome Volume">
+                </div>
+                <div style="width: 1px; height: 30px; background: #444; margin: 0 5px;"></div>
+                <div style="display: flex; flex-direction: column; gap: 5px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label style="color: #bdc3c7; font-size: 0.8em; font-weight: bold; display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                            <input type="checkbox" id="player-loop-toggle" onchange="app.updateLoopState()"> Loop
+                        </label>
+                        <label style="color: #bdc3c7; font-size: 0.7em; display: flex; align-items: center; gap: 3px; cursor: pointer;" title="Adds a 1-measure lead-in before the loop starts">
+                            <input type="checkbox" id="player-loop-countin" checked onchange="app.updateLoopState()"> Lead-In
+                        </label>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <input type="number" id="player-loop-start" min="0" value="0" style="width: 40px; background: #1a252f; border: 1px solid #444; color: white; border-radius: 3px; text-align: center;" onchange="app.updateLoopState()" title="Start Measure">
+                        <span style="color: #bdc3c7;">-</span>
+                        <input type="number" id="player-loop-end" min="0" value="4" style="width: 40px; background: #1a252f; border: 1px solid #444; color: white; border-radius: 3px; text-align: center;" onchange="app.updateLoopState()" title="End Measure">
+                    </div>
+                </div>
+            </div>
+
+            <div class="toolbar-section transparent" style="flex-grow: 1; justify-content: center;">
+                <button class="ctrl-btn" onclick="app.restartPlayer()">⏮ Restart</button>
+                <button class="ctrl-btn play" id="btn-player-play" onclick="app.togglePlayerPlay()">▶ Play</button>
+                <span id="player-time-display" style="font-family: monospace; font-size: 1.2em; width: 70px; text-align: center;">0.0b</span>
+            </div>
+            
+            <div class="toolbar-section transparent">
+                <button class="ctrl-btn stop" onclick="app.showMenu()">⏹ Menu</button>
+            </div>
+        </div>
+
+        <div id="player-viewport">
+            <canvas id="player-canvas"></canvas>
+            
+            <!-- Bottom Left Score HUD -->
+            <div id="score-overlay">
+                <div id="overlay-score-label">Current Score</div>
+                <h1 id="overlay-score-main">100%</h1>
+                <div id="overlay-score-prev">Previous Loop: --%</div>
+            </div>
+            
+            <!-- Pause Overlay -->
+            <div id="pause-overlay" class="hidden">
+                <h1 style="font-size: 4em; margin-bottom: 0; color: var(--manual);">PAUSED</h1>
+                <p style="color: #bdc3c7; font-size: 1.2em; margin-top: 10px;">Press Space or Play to resume</p>
+                <div id="pause-loop-history" class="loop-history-box hidden">
+                    <!-- Populated dynamically via JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Touch Screen Buttons go here -->
+        <div id="touch-controls"></div>
+    </div>
+</div>
+
+<script type="module">
+// ==========================================
+// CONFIGURATION FOR GITHUB HOSTING
+// ==========================================
+const CONFIG = {
+    // 1. Where are your custom audio files hosted?
+    AUDIO_BASE_URL: "./audio/",
+    
+    // Set your preferred audio format here (.mp3, .ogg, .wav, .m4a)
+    AUDIO_FORMAT: ".mp3",
+    
+    // 2. Where are your exported .ringer files hosted?
+    SONG_BASE_URL: "./songs/",
+    
+    // ========================================================
+    // AUTO-DISCOVERY OF SONGS VIA GITHUB API
+    GITHUB_USERNAME: "mablackburn",
+    GITHUB_REPO: "bellplayer",
+    // ========================================================
+    
+    // 3. Fallback list (Used ONLY if the GitHub API fails or you are offline)
+    FALLBACK_SONGS: [
+        // "Carol_of_the_Bells.ringer"
+    ]
+};
+// ==========================================
+
+const app = {
+    // EDITOR STATE
+    canvas: null, ctx: null, viewport: null, pages: [], activePageId: null,
+    measures: [], selectedIdx: -1, isStaffEditing: false, user: null, currentPhase: 'MEASURES',
+    zoom: 1.0, offsetX: 50, offsetY: 50, lastSize: { w: 200, h: 150 },
+    lastAttr: { tsTop: 4, tsBottom: 4, key: 'C', bpm: 120, beatVal: 4, metronomeBeats: [1, 2, 3, 4], numParts: 13 },
+    lastNoteAttr: { length: 1, technique: "none", accidental: "auto", partOverride: "none", dampen: "auto", accent: "none" }, 
+    assignments: {}, partNames: {}, globalStaff: { trebleBottom: 0.4, bassTop: 0.6 },
+    commonTS: [{top: 4, bottom: 4}, {top: 3, bottom: 4}, {top: 6, bottom: 8}, {top: 2, bottom: 4}],
+    commonKeys: ['C'], ALL_KEYS: ["C", "G", "D", "A", "E", "B", "F#", "C#", "F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb"],
+    setupSelectedKeys: ["C"],
+    isDrawing: false, isDragging: false, isResizingR: false, isResizingB: false, isPanning: false, 
+    isStaffDragging: false, isBeatDragging: false, isResizingInspector: false, startX: 0, startY: 0, curX: 0, curY: 0, dragOffset: { x: 0, y: 0 },
+    activeLine: null, activeBeatIdx: -1, spacePressed: false, hoverState: null, subdivideTarget: null,
+    activeNoteZone: null, selectedNoteIdx: -1, customPromptCallback: null,
+    
+    // Master Technique Dictionary (Mapped into Logic Buckets 1, 2, and 3)
+    TECHNIQUES: {
+        'none': { label: 'Standard Ring (R)', bucket: 2 },
+        'lv': { label: 'Let Vibrate (L)', bucket: 1 },
+        'malsus': { label: 'Mallet Suspended', bucket: 1 },
+        'shake': { label: 'Shake (K)', bucket: 2 },
+        'swing': { label: 'Tower Swing', bucket: 2 },
+        'echo': { label: 'Echo', bucket: 2 },
+        'gyro': { label: 'Gyro', bucket: 2 },
+        'sing': { label: 'Singing Bell', bucket: 2 },
+        'martlift': { label: 'Martellato Lift', bucket: 2 },
+        'mart': { label: 'Martellato (M)', bucket: 3 },
+        'pluck': { label: 'Pluck (P)', bucket: 3 },
+        'td': { label: 'Thumb Damp', bucket: 3 },
+        'mallet': { label: 'Mallet (Table)', bucket: 3 },
+        'rt': { label: 'Ring Touch', bucket: 3 }
+    },
+    
+    // PLAYER STATE
+    playerCanvas: null, playerCtx: null, playbackData: null,
+    audioCtx: null, masterCompressor: null, activeTones: {}, audioBuffers: {}, pageImages: {},
+    songDownloadUrls: {}, githubRawBaseUrl: "",
+    VOL_MAP: { 'ppp': 0.1, 'pp': 0.25, 'p': 0.4, 'mp': 0.6, 'mf': 0.8, 'f': 1.0, 'ff': 1.3, 'fff': 1.6 },
+    ACCENT_MAP: { 'none': 1.0, 'ghost': 0.5, 'accent': 1.5, 'marcato': 2.0 },
+    playerState: {
+        isPlaying: false, currentBeat: 0, lastTime: 0, partNum: 1, currentSongName: "",
+        partBells: [], bellGroups: [], flatNotes: [], flatMeasures: [], flatMetronomeBeats: [], flatVisualBeats: [],
+        tempoEvents: [], volEvents: [],
+        pixelsPerBeat: 250, pitchZoom: 1.0, tempoMultiplier: 1.0, metronomeVolume: 1.0, backgroundVolume: 0.4,
+        isLooping: false, loopCountIn: true, loopStartMeasure: 0, loopEndMeasure: 1, metronomeEnabled: true, showSheetMusic: false,
+        reqId: null, minPitch: 0, maxPitch: 60,
+        bellKeyMap: {}, heldKeys: {}, scorePct: 100, totalActions: 0, missedActions: 0, flares: [],
+        previousLoopScore: null, loopHistory: []
+    },
+
+    async init() {
+        this.canvas = document.getElementById('main-canvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.viewport = document.getElementById('canvas-viewport');
+        this.playerCanvas = document.getElementById('player-canvas');
+        this.playerCtx = this.playerCanvas.getContext('2d');
+
+        if (typeof auth !== 'undefined' && auth) {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
+                else await signInAnonymously(auth);
+            } catch (e) { console.error("Auth failed", e); }
+            if (typeof onAuthStateChanged !== 'undefined') {
+                onAuthStateChanged(auth, (user) => { this.user = user; if (user) this.setupDataListener(); });
+            }
+        }
+
+        this.initListeners();
+        this.renderSetupKeys();
+        this.renderSongLibrary();
+        
+        // Populate Technique Dropdown
+        const techSelect = document.getElementById('ins-note-tech');
+        if (techSelect) {
+            for (const [key, data] of Object.entries(this.TECHNIQUES)) {
+                const opt = document.createElement('option');
+                opt.value = key;
+                opt.text = data.label;
+                techSelect.appendChild(opt);
+            }
+        }
+        
+        const overrideSelect = document.getElementById('ins-note-override');
+        if (overrideSelect) {
+            for (let i = 1; i <= 25; i++) {
+                const opt = document.createElement('option'); opt.value = i; opt.text = `Part ${i}`; overrideSelect.appendChild(opt);
+            }
+        }
+    },
+
+    async renderSongLibrary() {
+        const libraryDiv = document.getElementById('song-library');
+        if (!libraryDiv) return;
+
+        libraryDiv.innerHTML = `<div style="color: #bdc3c7; font-style: italic;">Scanning library...</div>`;
+
+        let songFiles = [];
+        this.songDownloadUrls = {};
+        this.githubRawBaseUrl = "";
+
+        if (CONFIG.GITHUB_USERNAME && CONFIG.GITHUB_USERNAME !== "your-username" && CONFIG.GITHUB_REPO && CONFIG.GITHUB_REPO !== "your-repo-name") {
+            try {
+                const response = await fetch(`https://api.github.com/repos/${CONFIG.GITHUB_USERNAME}/${CONFIG.GITHUB_REPO}/contents/songs`);
+                if (response.ok) {
+                    const files = await response.json();
+                    
+                    if (files.length > 0 && files[0].download_url) {
+                        const urlParts = files[0].download_url.split('/songs/');
+                        if (urlParts.length === 2) {
+                            this.githubRawBaseUrl = urlParts[0] + '/';
+                        }
+                    }
+                    
+                    files.forEach(f => {
+                        this.songDownloadUrls[f.name] = f.download_url;
+                    });
+                    
+                    songFiles = files.filter(f => f.name.endsWith('.ringer') || f.name.endsWith('.json')).map(f => f.name);
+                } else {
+                    console.warn("GitHub API failed or repo is private. Using fallback list.");
+                    songFiles = CONFIG.FALLBACK_SONGS;
+                }
+            } catch (e) {
+                console.warn("Could not reach GitHub API. Using fallback list.", e);
+                songFiles = CONFIG.FALLBACK_SONGS;
+            }
+        } else {
+            songFiles = CONFIG.FALLBACK_SONGS;
+        }
+
+        if (songFiles.length === 0) {
+            libraryDiv.innerHTML = `<div style="color: #7f8c8d; font-style: italic; font-size: 0.9em; margin-top: 10px;">No songs found automatically. Double check your Github username/repo name in the CONFIG, or ensure you have a 'songs' folder uploaded. Use the manual Load button below to load local files.</div>`;
+            return;
+        }
+        
+        let html = '';
+        songFiles.forEach(filename => {
+            let cleanTitle = filename.replace('.ringer', '').replace('.json', '').replace(/_/g, ' ');
+            let safeFilename = filename.replace(/'/g, "\\'");
+            let safeTitle = cleanTitle.replace(/'/g, "\\'");
+            html += `
+                <button class="song-btn" onclick="app.fetchHostedSong('${safeFilename}', '${safeTitle}')">
+                    <span>${cleanTitle}</span>
+                    <span class="icon">🎵</span>
+                </button>
+            `;
+        });
+        libraryDiv.innerHTML = html;
+    },
+
+    initListeners() {
+        document.getElementById('image-loader')?.addEventListener('change', (e) => this.handleImage(e));
+        this.viewport?.addEventListener('mousedown', (e) => this.onMouseDown(e));
+        window.addEventListener('mousemove', (e) => this.onMouseMove(e));
+        window.addEventListener('mouseup', (e) => this.onMouseUp(e));
+        this.viewport?.addEventListener('wheel', (e) => this.handleWheel(e), { passive: false });
+        this.viewport?.addEventListener('contextmenu', (e) => e.preventDefault());
+        
+        const resizer = document.getElementById('inspector-resizer');
+        if (resizer) {
+            resizer.addEventListener('mousedown', (e) => {
+                this.isResizingInspector = true;
+                document.body.style.cursor = 'ew-resize';
+                resizer.classList.add('dragging');
+            });
+        }
+
+        window.addEventListener('resize', () => {
+            if (document.getElementById('player-layout')?.style?.display === 'flex') this.resizePlayerCanvas();
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return; 
+            
+            if (document.getElementById('player-layout')?.style?.display === 'flex') {
+                if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 's') {
+                    e.preventDefault();
+                    this.playerState.showSheetMusic = !this.playerState.showSheetMusic;
+                    if (!this.playerState.isPlaying) this.renderPlayer();
+                    return;
+                }
+                if (e.code === 'Space') { e.preventDefault(); this.togglePlayerPlay(); return; }
+                if (e.repeat) return; 
+                const key = e.key.toLowerCase();
+                if (this.playerState.bellKeyMap && this.playerState.bellKeyMap[key]) {
+                    const group = this.playerState.bellKeyMap[key];
+                    if (group.touchBtn) { 
+                        group.touchBtn.classList.add('active'); 
+                        group.touchBtn.style.backgroundColor = this.hexToRgba(group.color, 0.6); 
+                    }
+                    this.handleBellRing(key);
+                }
+                return;
+            }
+            
+            if (this.currentPhase === 'PARTS') return; 
+            if (e.code === 'Space') { this.spacePressed = true; this.viewport?.classList.add('panning'); return; }
+            if (e.code === 'Delete' || e.code === 'Backspace') {
+                if (this.currentPhase === 'NOTES' && this.selectedNoteIdx !== -1) this.deleteSelectedNote();
+                else if (this.currentPhase === 'MEASURES' && this.selectedIdx !== -1) this.deleteSelected();
+                return;
+            }
+            if (this.currentPhase === 'MEASURES') {
+                const num = parseInt(e.key);
+                if (num >= 1 && num <= this.commonTS.length) { const ts = this.commonTS[num - 1]; this.setQuickTS(ts.top, ts.bottom); }
+                return;
+            }
+            if (this.currentPhase === 'NOTES' && this.activeNoteZone) {
+                const k = e.key.toLowerCase();
+                if (k === 'a') this.updateNoteAttr('accidental', 'auto');
+                if (k === 'n') this.updateNoteAttr('accidental', 'natural');
+                if (k === 's') this.updateNoteAttr('accidental', 'sharp');
+                if (k === 'f') this.updateNoteAttr('accidental', 'flat');
+                if (k === 'r') this.updateNoteAttr('technique', 'none');
+                if (k === 'l') this.updateNoteAttr('technique', 'lv');
+                if (k === 'm') this.updateNoteAttr('technique', 'mart');
+                if (k === 'k') this.updateNoteAttr('technique', 'shake');
+                if (k === 'p') this.updateNoteAttr('technique', 'pluck');
+                if (k === 'w') this.updateNoteAttr('length', 4);
+                if (k === 'h') this.updateNoteAttr('length', 2);
+                if (k === 'q') this.updateNoteAttr('length', 1);
+                if (k === 'e') this.updateNoteAttr('length', 0.5);
+                if (k === 'x') this.updateNoteAttr('length', 0.25);
+                if (k === 'd') {
+                    if (this.selectedNoteIdx !== -1) {
+                        const m = this.measures[this.activeNoteZone.mIdx];
+                        const n = m.notes[this.selectedNoteIdx];
+                        let current = n.dampen;
+                        if (current === 'auto' || current === undefined) current = this.computeAutoDampen(m, n, this.measures);
+                        else current = (current === true || current === 'true');
+                        this.updateNoteAttr('dampen', !current);
+                    }
+                }
+            }
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            if (document.getElementById('player-layout')?.style?.display === 'flex') {
+                const key = e.key.toLowerCase();
+                if (this.playerState.bellKeyMap && this.playerState.bellKeyMap[key]) {
+                    const group = this.playerState.bellKeyMap[key];
+                    if (group.touchBtn) { 
+                        group.touchBtn.classList.remove('active'); 
+                        group.touchBtn.style.backgroundColor = this.hexToRgba(group.color, 0.2); 
+                    }
+                    this.handleBellDampen(key);
+                }
+                return;
+            }
+            if (e.code === 'Space') { this.spacePressed = false; this.viewport?.classList.remove('panning'); this.updateCursor(); }
+        });
+
+        document.getElementById('ins-key')?.addEventListener('change', (e) => this.updateSelectedAttr('key', e.target.value));
+        document.getElementById('ins-bpm')?.addEventListener('change', (e) => { const val = parseInt(e.target.value) || 120; this.updateSelectedAttr('bpm', val); });
+    },
+
+    setupDataListener() {
+        if (typeof db === 'undefined' || !db || typeof doc === 'undefined' || typeof onSnapshot === 'undefined' || typeof appId === 'undefined') return;
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'scores', 'default');
+        onSnapshot(docRef, (snap) => {
+            if (snap.exists()) {
+                const data = snap.data();
+                if (data.globalStaff) {
+                    if (data.globalStaff.t2 !== undefined) this.globalStaff = { trebleBottom: data.globalStaff.t2, bassTop: data.globalStaff.b1 };
+                    else this.globalStaff = data.globalStaff;
+                }
+                this.measures = (data.measures || []).map(m => {
+                    if (m.w < 0) { m.x += m.w; m.w = Math.abs(m.w); }
+                    if (m.h < 0) { m.y += m.h; m.h = Math.abs(m.h); }
+                    if (m.staff && m.staff.t2 !== undefined) m.staff = { trebleBottom: m.staff.t2, bassTop: m.staff.b1 };
+                    if (m.beats && m.beats.length > 0 && typeof m.beats[0] === 'number') m.beats = m.beats.map(b => ({ val: b, isMain: true, manual: false }));
+                    else if (!m.beats || m.beats.length === 0) m.beats = this.getDefaultBeats(m.tsTop, m.gridBeats);
+                    if (!m.notes) m.notes = [];
+                    m.notes.forEach(n => { 
+                        if (n.dampen === undefined) n.dampen = 'auto'; 
+                        if (n.accent === undefined) n.accent = 'none';
+                    });
+                    if (!m.bpm) m.bpm = 120;
+                    if (!m.beatVal) m.beatVal = 4;
+                    if (!m.clefs) m.clefs = { top: 'treble', bottom: 'bass' };
+                    return m;
+                });
+                if (data.commonTS) this.commonTS = data.commonTS;
+                if (data.commonKeys) this.commonKeys = data.commonKeys;
+                if (data.lastAttr) this.lastAttr = { ...this.lastAttr, ...data.lastAttr };
+                if (data.lastNoteAttr) this.lastNoteAttr = { ...this.lastNoteAttr, ...data.lastNoteAttr };
+                if (data.assignments) this.assignments = data.assignments;
+                if (data.partNames) this.partNames = data.partNames;
+                if (this.measures.length > 0) document.getElementById('btn-continue-project')?.classList.remove('hidden');
+                if (this.currentPhase === 'PARTS') this.renderPartsWorkspace();
+                else this.render();
+            }
+        }, (err) => console.error("Firestore error:", err));
+    },
+
+    async saveState() {
+        if (!this.user || typeof db === 'undefined' || !db || typeof doc === 'undefined' || typeof setDoc === 'undefined' || typeof appId === 'undefined') return;
+        const status = document.getElementById('save-status');
+        if (status) { status.innerText = "Saving..."; status.style.opacity = 1; }
+        try {
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'scores', 'default');
+            const safeData = JSON.parse(JSON.stringify({
+                measures: this.measures, globalStaff: this.globalStaff,
+                pageOrder: this.pages.map(p => p.id), commonTS: this.commonTS,
+                commonKeys: this.commonKeys, lastAttr: this.lastAttr,
+                lastNoteAttr: this.lastNoteAttr, assignments: this.assignments, 
+                partNames: this.partNames, lastUpdated: Date.now()
+            }));
+            await setDoc(docRef, safeData);
+            if (status) { status.innerText = "Saved"; setTimeout(() => { status.style.opacity = 0; }, 1000); }
+        } catch (e) { 
+            console.error("Save failed", e); 
+            if (status) { status.innerText = "Save Error!"; status.style.color = "red"; }
+        }
+    },
+
+    getLogicalTime(m, frac) {
+        const safeBeats = m.beats || [];
+        const mainBeats = safeBeats.filter(b => b.isMain).sort((a,b) => a.val - b.val);
+        const mTsTop = m.tsTop || 4;
+        
+        let rawLogTime = frac * mTsTop;
+        let found = false;
+
+        if (mainBeats.length > 0) {
+            const gridBeats = m.gridBeats || mTsTop;
+            const step = mTsTop / gridBeats;
+
+            for (let k = 0; k < mainBeats.length - 1; k++) {
+                if (frac >= mainBeats[k].val && frac <= mainBeats[k+1].val) {
+                    let logicalStart = k * step;
+                    let logicalEnd = (k+1) * step;
+                    let pct = (frac - mainBeats[k].val) / (mainBeats[k+1].val - mainBeats[k].val);
+                    rawLogTime = logicalStart + (pct * (logicalEnd - logicalStart));
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                const lastIdx = mainBeats.length - 1;
+                if (frac >= mainBeats[lastIdx].val) {
+                    let logicalStart = lastIdx * step;
+                    let logicalEnd = mTsTop; 
+                    let pct = (frac - mainBeats[lastIdx].val) / (1.0 - mainBeats[lastIdx].val);
+                    rawLogTime = logicalStart + (pct * (logicalEnd - logicalStart));
+                }
+            }
+        }
+        
+        // Quantize to the nearest 1/24th of a beat (Fixes human click errors!)
+        // Perfectly snaps to 8ths, 16ths, 32nds, and exact Triplets
+        return Math.round(rawLogTime * 24) / 24;
+    },
+
+    getFracFromLogicalTime(m, logTime) {
+        const safeBeats = m.beats || [];
+        const mainBeats = safeBeats.filter(b => b.isMain).sort((a,b) => a.val - b.val);
+        const mTsTop = m.tsTop || 4;
+        if (mainBeats.length === 0) return logTime / mTsTop;
+        const gridBeats = m.gridBeats || mTsTop;
+        const step = mTsTop / gridBeats;
+        
+        for (let k = 0; k < mainBeats.length; k++) {
+            let logicalStart = k * step;
+            let logicalEnd = (k+1) * step;
+            if (logTime >= logicalStart && logTime <= logicalEnd) {
+                let startVal = mainBeats[k].val;
+                let endVal = (k + 1 < mainBeats.length) ? mainBeats[k+1].val : 1.0;
+                let pct = (logTime - logicalStart) / step;
+                return startVal + (pct * (endVal - startVal));
+            }
+        }
+        return logTime / mTsTop;
+    },
+
+    getPitchY(m, half, pitchIdx) {
+        const staff = m.staff || this.globalStaff; const clef = m.clefs[half];
+        let yTop, yBottom;
+        if (half === 'top') { yTop = m.y; yBottom = m.y + (m.h * staff.trebleBottom); }
+        else { yTop = m.y + (m.h * staff.bassTop); yBottom = m.y + m.h; }
+        const pixelsPerStep = (yBottom - yTop) / 8;
+        const bottomPitchRef = (clef === 'treble') ? 30 : 18; 
+        return yBottom - ((pitchIdx - bottomPitchRef) * pixelsPerStep);
+    },
+
+    getPitchFromY(m, half, y) {
+        const staff = m.staff || this.globalStaff; const clef = m.clefs[half];
+        let yTop, yBottom;
+        if (half === 'top') { yTop = m.y; yBottom = m.y + (m.h * staff.trebleBottom); }
+        else { yTop = m.y + (m.h * staff.bassTop); yBottom = m.y + m.h; }
+        const pixelsPerStep = (yBottom - yTop) / 8;
+        const bottomPitchRef = (clef === 'treble') ? 30 : 18; 
+        return Math.round(bottomPitchRef + ((yBottom - y) / pixelsPerStep));
+    },
+
+    getPitchName(pitchIdx) {
+        const notes = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+        return notes[((pitchIdx % 7) + 7) % 7] + Math.floor(pitchIdx / 7);
+    },
+    
+    resolveAccidental(pitchIdx, noteAcc, keySig) {
+        if (noteAcc !== 'auto') return noteAcc;
+        const noteName = ['C', 'D', 'E', 'F', 'G', 'A', 'B'][((pitchIdx % 7) + 7) % 7];
+        const sharps = { 'G': ['F'], 'D': ['F','C'], 'A': ['F','C','G'], 'E': ['F','C','G','D'], 'B': ['F','C','G','D','A'], 'F#': ['F','C','G','D','A','E'], 'C#': ['F','C','G','D','A','E','B'] };
+        const flats = { 'F': ['B'], 'Bb': ['B','E'], 'Eb': ['B','E','A'], 'Ab': ['B','E','A','D'], 'Db': ['B','E','A','D','G'], 'Gb': ['B','E','A','D','G','C'], 'Cb': ['B','E','A','D','G','C','F'] };
+        if (sharps[keySig] && sharps[keySig].includes(noteName)) return 'sharp';
+        if (flats[keySig] && flats[keySig].includes(noteName)) return 'flat';
+        return 'natural';
+    },
+
+    hexToRgba(hex, alpha) {
+        var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ? `rgba(${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}, ${alpha})` : `rgba(149, 165, 166, ${alpha})`;
+    },
+
+    computeAutoDampen(startM, n, measureList) {
+        let remLen = parseFloat(n.length) || 1;
+        let cMIdx = measureList.indexOf(startM);
+        let cLogTime = this.getLogicalTime(startM, n.time);
+        
+        // Tolerance for slight human clicking imperfections (0.15 beats)
+        const tolerance = 0.15; 
+        
+        while (remLen > 0.001 && cMIdx !== -1 && cMIdx < measureList.length) {
+            const curM = measureList[cMIdx];
+            let logAvail = (curM.tsTop || 4) - cLogTime;
+            let logConsume = Math.min(remLen, logAvail);
+            let endLogTime = cLogTime + logConsume;
+            
+            // Check if note reaches within tolerance of the end of the measure
+            let reachingNextDownbeat = (Math.abs(remLen - logAvail) <= tolerance);
+            
+            if (remLen <= logAvail + tolerance) {
+                let targetMIdx = cMIdx;
+                let targetFrac = 0;
+                
+                if (reachingNextDownbeat && cMIdx + 1 < measureList.length) {
+                    targetMIdx = cMIdx + 1;
+                    const nextM = measureList[targetMIdx];
+                    const nextB = (nextM.beats || []).filter(b => b.isMain).sort((a,b)=>a.val-b.val);
+                    targetFrac = nextB.length > 0 ? nextB[0].val : 0;
+                } else {
+                    targetFrac = this.getFracFromLogicalTime(curM, endLogTime);
+                }
+                
+                if (targetMIdx !== -1 && targetMIdx < measureList.length) {
+                    const targetM = measureList[targetMIdx];
+                    if (targetM.notes) {
+                        for (let nn of targetM.notes) {
+                            if (nn === n) continue; 
+                            // Match the exact bell, regardless of which staff half it was mapped on
+                            if (nn.pitch === n.pitch) {
+                                // Added leniency to the visual snap check as well
+                                if (Math.abs(nn.time - targetFrac) <= 0.08) return false; 
+                            }
+                        }
+                    }
+                }
+                return true; 
+            }
+            remLen -= logConsume; cMIdx++; cLogTime = 0;
+        }
+        return true;
+    },
+
+    renderSetupKeys() {
+        const grid = document.getElementById('setup-key-grid');
+        if (!grid) return;
+        grid.innerHTML = '';
+        this.ALL_KEYS.forEach(k => {
+            const btn = document.createElement('button');
+            btn.className = `ts-btn ${this.setupSelectedKeys.includes(k) ? 'active' : ''}`;
+            btn.innerText = k;
+            btn.onclick = () => {
+                if (this.setupSelectedKeys.includes(k)) {
+                    if (this.setupSelectedKeys.length > 1) this.setupSelectedKeys = this.setupSelectedKeys.filter(x => x !== k);
+                } else { this.setupSelectedKeys.push(k); }
+                this.renderSetupKeys();
+            };
+            grid.appendChild(btn);
+        });
+    },
+
+    showSetup() {
+        document.getElementById('setup-modal')?.classList.remove('hidden');
+        this.renderSetupKeys();
+    },
+
+    showMenu() {
+        document.getElementById('main-menu').classList.remove('hidden');
+        document.getElementById('top-nav').style.display = 'flex';
+        document.getElementById('editor-layout').style.display = 'none';
+        document.getElementById('state-toolbar').style.display = 'none';
+        document.getElementById('player-layout').style.display = 'none';
+        document.getElementById('player-setup-modal').classList.add('hidden');
+        document.getElementById('exit-to-menu')?.classList.add('hidden');
+        if (this.playerState.reqId) { cancelAnimationFrame(this.playerState.reqId); this.playerState.reqId = null; }
+    },
+
+    startEditor() {
+        // Completely wipe the slate clean for a fresh project
+        this.measures = [];
+        this.pages = [];
+        this.activePageId = null;
+        this.assignments = {};
+        this.partNames = {};
+        this.selectedIdx = -1;
+        this.activeNoteZone = null;
+        this.selectedNoteIdx = -1;
+        this.renderThumbnails();
+
+        const tsInput = document.getElementById('setup-ts');
+        if (tsInput) {
+            this.commonTS = tsInput.value.split(',').map(s => {
+                const parts = s.trim().split('/');
+                return { top: parseInt(parts[0]) || 4, bottom: parseInt(parts[1]) || 4 };
+            });
+            if (this.commonTS.length > 0) { this.lastAttr.tsTop = this.commonTS[0].top; this.lastAttr.tsBottom = this.commonTS[0].bottom; }
+        }
+        
+        this.commonKeys = [...this.setupSelectedKeys];
+        if (this.commonKeys.length > 0) this.lastAttr.key = this.commonKeys[0];
+        
+        const bpmIn = document.getElementById('setup-bpm'); if (bpmIn) this.lastAttr.bpm = parseInt(bpmIn.value) || 120;
+        const bvalIn = document.getElementById('setup-beat-val'); if (bvalIn) this.lastAttr.beatVal = parseInt(bvalIn.value) || 4;
+        
+        document.getElementById('setup-modal')?.classList.add('hidden');
+        this.renderTSButtons(); this.renderKeyButtons(); this.saveState();
+        
+        document.getElementById('main-menu')?.classList.add('hidden');
+        const topNav = document.getElementById('top-nav'); if (topNav) topNav.style.display = 'flex';
+        const editorLayout = document.getElementById('editor-layout'); if (editorLayout) editorLayout.style.display = 'flex';
+        const stateToolbar = document.getElementById('state-toolbar'); if (stateToolbar) stateToolbar.style.display = 'flex';
+        document.getElementById('exit-to-menu')?.classList.remove('hidden');
+        
+        this.currentPhase = 'MEASURES';
+        this.setPhase('MEASURES');
+        this.render();
+        
+        if (this.pages.length === 0) document.getElementById('image-loader')?.click();
+    },
+
+    exportProject() {
+        const status = document.getElementById('save-status');
+        if (status) { status.innerText = "Exporting..."; status.style.opacity = 1; }
+        
+        try {
+            const projectData = JSON.parse(JSON.stringify({
+                measures: this.measures, globalStaff: this.globalStaff,
+                commonTS: this.commonTS, commonKeys: this.commonKeys,
+                lastAttr: this.lastAttr, lastNoteAttr: this.lastNoteAttr,
+                assignments: this.assignments, partNames: this.partNames, pages: this.pages.map(p => ({ id: p.id, src: p.img.src }))
+            }));
+
+            const blob = new Blob([JSON.stringify(projectData)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.setAttribute("href", url); a.setAttribute("download", "choir_score.ringer");
+            document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+            if (status) { status.innerText = "Exported!"; status.style.color = "var(--success)"; }
+        } catch(e) { 
+            console.error("Export Error:", e);
+            if (status) { status.innerText = "Export Failed"; status.style.color = "red"; }
+        }
+        
+        setTimeout(() => { 
+            if (status) {
+                status.style.opacity = 0; 
+                setTimeout(() => { status.innerText = "Saving..."; status.style.color = "var(--success)"; }, 500); 
+            }
+        }, 2000);
+    },
+
+    importProject(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            try {
+                const data = JSON.parse(event.target.result);
+                this.measures = data.measures || []; this.globalStaff = data.globalStaff || this.globalStaff;
+                this.commonTS = data.commonTS || this.commonTS; this.commonKeys = data.commonKeys || this.commonKeys;
+                this.lastAttr = data.lastAttr || this.lastAttr; this.lastNoteAttr = data.lastNoteAttr || this.lastNoteAttr;
+                this.assignments = data.assignments || {};
+                this.partNames = data.partNames || {};
+                
+                if (data.pages) {
+                    this.pages = await Promise.all(data.pages.map(pData => new Promise((resolve) => {
+                        const img = new Image(); img.onload = () => resolve({ id: pData.id, img: img }); img.src = pData.src;
+                    })));
+                }
+                this.saveState(); this.continueProject();
+                
+                if (this.pages.length > 0) this.switchPage(this.pages[0].id);
+                else { this.renderThumbnails(); this.render(); }
+                e.target.value = ''; 
+            } catch (err) { this.showAlert("Import failed. Invalid format."); }
+        };
+        reader.readAsText(file);
+    },
+
+    continueProject() {
+        document.getElementById('main-menu')?.classList.add('hidden');
+        const topNav = document.getElementById('top-nav'); if (topNav) topNav.style.display = 'flex';
+        const editorLayout = document.getElementById('editor-layout'); if (editorLayout) editorLayout.style.display = 'flex';
+        const stateToolbar = document.getElementById('state-toolbar'); if (stateToolbar) stateToolbar.style.display = 'flex';
+        document.getElementById('exit-to-menu')?.classList.remove('hidden');
+        
+        this.setPhase(this.currentPhase);
+        this.render();
+    },
+
+    toggleSidebar() { document.getElementById('sidebar-thumbnails')?.classList.toggle('collapsed'); },
+
+    setPhase(phase) {
+        this.currentPhase = phase;
+        this.selectedBeatIdx = -1; // Reset beat selection
+        
+        document.getElementById('tab-measures')?.classList.toggle('active', phase === 'MEASURES');
+        document.getElementById('tab-beats')?.classList.toggle('active', phase === 'BEATS');
+        document.getElementById('tab-notes')?.classList.toggle('active', phase === 'NOTES');
+        document.getElementById('tab-parts')?.classList.toggle('active', phase === 'PARTS');
+
+        if (phase === 'PARTS') {
+            document.getElementById('canvas-viewport')?.classList.add('hidden');
+            document.getElementById('sidebar-thumbnails')?.classList.add('hidden');
+            document.getElementById('inspector')?.classList.add('hidden');
+            document.getElementById('main-zoom-controls')?.classList.add('hidden');
+            document.getElementById('parts-workspace')?.classList.remove('hidden');
+            document.getElementById('hud-overlay')?.classList.add('hidden');
+            
+            this.computeAssignments(null, false);
+            this.renderPartsWorkspace();
+        } else {
+            document.getElementById('canvas-viewport')?.classList.remove('hidden');
+            document.getElementById('sidebar-thumbnails')?.classList.remove('hidden');
+            document.getElementById('inspector')?.classList.remove('hidden');
+            document.getElementById('main-zoom-controls')?.classList.remove('hidden');
+            document.getElementById('parts-workspace')?.classList.add('hidden');
+            document.getElementById('hud-overlay')?.classList.remove('hidden');
+            
+            const titleEl = document.getElementById('hud-phase-title');
+            if (titleEl) {
+                titleEl.innerText = `WORKSHOP: ${phase} PHASE`;
+                if (phase === 'BEATS') titleEl.style.color = 'var(--beat)';
+                else if (phase === 'NOTES') titleEl.style.color = 'var(--note)';
+                else titleEl.style.color = 'var(--accent)';
+            }
+            
+            document.getElementById('hud-measure-controls')?.classList.toggle('hidden', phase !== 'MEASURES');
+            document.getElementById('hud-beat-controls')?.classList.toggle('hidden', phase !== 'BEATS');
+            document.getElementById('hud-note-controls')?.classList.toggle('hidden', phase !== 'NOTES');
+
+            this.selectedIdx = -1; this.selectedNoteIdx = -1; this.isStaffEditing = false; this.activeNoteZone = null;
+            
+            document.getElementById('staff-controls-panel')?.classList.toggle('hidden', phase !== 'MEASURES');
+            document.getElementById('btn-delete-measure')?.classList.toggle('hidden', phase !== 'MEASURES');
+            document.getElementById('beat-controls-panel')?.classList.toggle('hidden', phase !== 'BEATS');
+            
+            this.updateInspector();
+            this.render();
+        }
+    },
+
+    getUniqueBells() {
+        const usedBells = new Map();
+        this.measures.forEach(m => {
+            if (m.notes) {
+                m.notes.forEach(n => {
+                    const resolvedAcc = this.resolveAccidental(n.pitch, n.accidental, m.key || 'C');
+                    const nKey = `${n.pitch}_${resolvedAcc}`;
+                    if (!usedBells.has(nKey)) usedBells.set(nKey, { pitch: n.pitch, acc: resolvedAcc });
+                });
+            }
+        });
+        return Array.from(usedBells.values()).sort((a, b) => b.pitch - a.pitch); 
+    },
+    
+    getDefaultPartAndColor(pitchIdx, acc) {
+        const noteName = ['C', 'D', 'E', 'F', 'G', 'A', 'B'][((pitchIdx % 7) + 7) % 7];
+        const octave = Math.floor(pitchIdx / 7);
+        let part = 13;
+        
+        if (octave < 2 || (octave === 2 && ['C','D','E','F'].includes(noteName))) part = 13;
+        else if (octave === 2 && ['G','A','B'].includes(noteName)) part = 12;
+        else if (octave === 3 && ['C','D'].includes(noteName)) part = 11;
+        else if (octave === 3 && ['E','F'].includes(noteName)) part = 10;
+        else if (octave === 3 && ['G','A'].includes(noteName)) part = 9;
+        else if ((octave === 3 && noteName === 'B') || (octave === 4 && noteName === 'C')) part = 8;
+        else if (octave === 4 && ['D','E'].includes(noteName)) part = 7;
+        else if (octave === 4 && ['F','G'].includes(noteName)) part = 6;
+        else if (octave === 4 && ['A','B'].includes(noteName)) part = 5;
+        else if (octave === 5 && ['C','D'].includes(noteName)) part = 4;
+        else if (octave === 6 && noteName === 'D') part = 4;
+        else if (octave === 5 && ['E','F'].includes(noteName)) part = 3;
+        else if (octave === 6 && ['E','F'].includes(noteName)) part = 3;
+        else if (octave === 5 && ['G','A'].includes(noteName)) part = 2;
+        else if (octave === 6 && ['G','A'].includes(noteName)) part = 2;
+        else if (octave === 5 && noteName === 'B') part = 1;
+        else if (octave === 6 && ['C','B'].includes(noteName)) part = 1;
+        else if (octave >= 7) part = 1;
+        
+        let color = (acc === 'natural') ? ((pitchIdx % 2 === 0) ? '#3498db' : '#e74c3c') : ((pitchIdx % 2 === 0) ? '#2ecc71' : '#f1c40f');
+        return { part, color };
+    },
+
+    updateNumParts() {
+        let val = parseInt(document.getElementById('parts-num-input').value);
+        if (val >= 1 && val <= 25) { this.lastAttr.numParts = val; this.saveState(); this.renderPartsWorkspace(); }
+    },
+    
+    computeAssignments(usedBells, forceOverwrite = false) {
+        if (!usedBells) usedBells = this.getUniqueBells();
+        if (usedBells.length === 0) return;
+        if (!this.assignments) this.assignments = {}; 
+
+        usedBells.forEach(b => {
+            const nKey = `${b.pitch}_${b.acc}`;
+            if (forceOverwrite) this.assignments[nKey] = null; 
+            if (!this.assignments[nKey] || this.assignments[nKey].part === 'none' || this.assignments[nKey].part === 'unassigned') {
+                const defaults = this.getDefaultPartAndColor(b.pitch, b.acc);
+                this.assignments[nKey] = { part: defaults.part, color: defaults.color, manualColor: false };
+            }
+        });
+        
+        const partsMap = {};
+        usedBells.forEach(b => {
+            const nKey = `${b.pitch}_${b.acc}`; const p = this.assignments[nKey].part;
+            if (!partsMap[p]) partsMap[p] = []; partsMap[p].push(b);
+        });
+
+        const extendedPalette = ['#e67e22', '#9b59b6', '#fd79a8', '#8d6e63', '#1abc9c', '#34495e', '#f39c12'];
+        const bassPalette = ['#e67e22', '#9b59b6', '#fd79a8', '#8d6e63', '#1abc9c', '#f39c12', '#d35400', '#c0392b'];
+
+        for (const p in partsMap) {
+            if (p === 'none' || p === 'unassigned') continue;
+            const group = partsMap[p]; 
+            const pitchClasses = {};
+            group.forEach(b => {
+                const pc = `${b.pitch % 7}_${b.acc}`;
+                if (!pitchClasses[pc]) pitchClasses[pc] = { basePitch: b.pitch, acc: b.acc, bells: [] };
+                pitchClasses[pc].bells.push(b);
+            });
+            const uniqueClasses = Object.values(pitchClasses).sort((a, b) => a.basePitch - b.basePitch);
+            
+            if (parseInt(p) >= 12 || uniqueClasses.length > 4) {
+                uniqueClasses.forEach((pc, i) => {
+                    const color = bassPalette[i % bassPalette.length];
+                    pc.bells.forEach(b => {
+                        const nKey = `${b.pitch}_${b.acc}`;
+                        if (!this.assignments[nKey].manualColor || forceOverwrite) this.assignments[nKey].color = color;
+                    });
+                });
+            } else {
+                const naturals = uniqueClasses.filter(pc => pc.acc === 'natural');
+                const accidentals = uniqueClasses.filter(pc => pc.acc !== 'natural');
+                let extIdx = 0;
+                
+                naturals.forEach((pc, i) => {
+                    let color = (i === 0) ? '#3498db' : (i === 1) ? '#e74c3c' : extendedPalette[extIdx++ % extendedPalette.length];
+                    pc.bells.forEach(b => {
+                        const nKey = `${b.pitch}_${b.acc}`;
+                        if (!this.assignments[nKey].manualColor || forceOverwrite) this.assignments[nKey].color = color;
+                    });
+                });
+                
+                accidentals.forEach((pc, i) => {
+                    let color = (i === 0) ? '#2ecc71' : (i === 1) ? '#f1c40f' : extendedPalette[extIdx++ % extendedPalette.length];
+                    pc.bells.forEach(b => {
+                        const nKey = `${b.pitch}_${b.acc}`;
+                        if (!this.assignments[nKey].manualColor || forceOverwrite) this.assignments[nKey].color = color;
+                    });
+                });
+            }
+        }
+        this.saveState();
+        if (this.currentPhase === 'PARTS') this.renderPartsWorkspace();
+    },
+    
+    updateGlobalAssignment(nKey, key, val) {
+        if (!this.assignments) this.assignments = {};
+        if (!this.assignments[nKey]) this.assignments[nKey] = { part: 'none', color: '#95a5a6' };
+        if (key === 'color') this.assignments[nKey].manualColor = true;
+        this.assignments[nKey][key] = val;
+        
+        if (key === 'part') this.computeAssignments(null, false); 
+        else {
+            this.saveState();
+            const card = document.getElementById(`part-card-${nKey}`);
+            if (card && key === 'color') { card.style.borderLeft = `8px solid ${val}`; }
+        }
+    },
+
+    updatePartName(partNum, name) {
+        if (!this.partNames) this.partNames = {};
+        this.partNames[partNum] = name;
+        this.saveState();
+        this.renderPartsWorkspace(); // Re-render to update the dropdown labels
+    },
+
+    renderPartsWorkspace() {
+        const wrapper = document.getElementById('parts-grid');
+        const usedBells = this.getUniqueBells();
+        const numParts = this.lastAttr.numParts || 13;
+        
+        const numInput = document.getElementById('parts-num-input');
+        if (numInput) numInput.value = numParts;
+
+        const namesContainer = document.getElementById('part-names-container');
+        if (namesContainer) {
+            let namesHtml = '';
+            for(let i = 1; i <= numParts; i++) {
+                let currentName = (this.partNames && this.partNames[i]) ? this.partNames[i] : '';
+                namesHtml += `
+                    <div style="background: #1a252f; padding: 8px; border-radius: 6px; display: flex; align-items: center; gap: 5px;">
+                        <label style="color: #bdc3c7; font-weight: bold; font-size: 0.8em; width: 35px;">P${i}:</label>
+                        <input type="text" placeholder="Name..." value="${currentName}" onchange="app.updatePartName(${i}, this.value)" style="flex-grow: 1; background: #111; border: 1px solid #444; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; outline: none; width: 100%;">
+                    </div>
+                `;
+            }
+            namesContainer.innerHTML = namesHtml;
+        }
+
+        if (usedBells.length === 0) {
+            wrapper.innerHTML = `<div style="color: #7f8c8d; font-style: italic; font-size: 1.2em; text-align: center; padding: 40px;">No notes have been mapped yet. Map notes in Phase 3 to generate parts!</div>`;
+            return;
+        }
+
+        let html = ``;
+        usedBells.forEach((b, i) => {
+            const nKey = `${b.pitch}_${b.acc}`;
+            const assign = this.assignments[nKey] || {part: 'none', color: '#95a5a6'};
+            let name = this.getPitchName(b.pitch);
+            if (b.acc === 'sharp') name += '♯'; else if (b.acc === 'flat') name += '♭';
+
+            let partOptions = `<option value="none">Unassigned</option>`;
+            for(let i=1; i<=numParts; i++) {
+                let pLabel = (this.partNames && this.partNames[i]) ? `Part ${i} (${this.partNames[i]})` : `Part ${i}`;
+                partOptions += `<option value="${i}" ${assign.part == i ? 'selected' : ''}>${pLabel}</option>`;
+            }
+
+            const colors = [
+                { val: '#95a5a6', label: 'Unassigned' }, { val: '#3498db', label: 'Blue' }, { val: '#e74c3c', label: 'Red' },
+                { val: '#2ecc71', label: 'Green' }, { val: '#f1c40f', label: 'Yellow' }, { val: '#e67e22', label: 'Orange' },
+                { val: '#9b59b6', label: 'Purple' }, { val: '#fd79a8', label: 'Pink' }, { val: '#8d6e63', label: 'Brown' },
+                { val: '#1abc9c', label: 'Teal' }, { val: '#34495e', label: 'Dark Navy' }
+            ];
+            let colorOptions = '';
+            colors.forEach(c => { colorOptions += `<option value="${c.val}" ${assign.color === c.val ? 'selected' : ''}>${c.label}</option>`; });
+
+            html += `
+            <div id="part-card-${nKey}" style="background: #2c3e50; border-radius: 6px; border-left: 8px solid ${assign.color}; display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+                <div style="font-size: 1.6em; font-weight: bold; color: white; width: 80px;">${name}</div>
+                <div style="display: flex; gap: 20px; flex-grow: 1; justify-content: flex-end;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label style="color: #bdc3c7; font-size: 0.8em; text-transform: uppercase;">Part:</label>
+                        <select onchange="app.updateGlobalAssignment('${nKey}', 'part', this.value)" style="background: #1a252f; border: 1px solid #444; color: white; padding: 8px; border-radius: 4px;">${partOptions}</select>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label style="color: #bdc3c7; font-size: 0.8em; text-transform: uppercase;">Color:</label>
+                        <select onchange="app.updateGlobalAssignment('${nKey}', 'color', this.value)" style="background: #1a252f; border: 1px solid #444; color: white; padding: 8px; border-radius: 4px;">${colorOptions}</select>
+                    </div>
+                </div>
+            </div>`;
+        });
+        wrapper.innerHTML = html;
+    },
+
+    updateGridBeats() {
+        if (this.selectedIdx === -1) return;
+        const m = this.measures[this.selectedIdx];
+        const val = parseInt(document.getElementById('ins-grid-beats').value);
+        if (val >= 1 && val <= 32) {
+            m.gridBeats = val;
+            m.beats = this.getDefaultBeats(m.tsTop, val);
+            this.saveState();
+            this.render();
+        }
+    },
+
+    getDefaultMetronome(top) { return Array.from({length: top}, (_, i) => i + 1); },
+
+    getDefaultBeats(top, gridOverride) { 
+        const lines = gridOverride || top;
+        return Array.from({length: lines}, (_, i) => ({ val: (i + 0.5) / lines, isMain: true, manual: false })); 
+    },
+
+    redistributeBeats(m) {
+        let manualIndices = [-1];
+        for(let i=0; i<m.beats.length; i++) if(m.beats[i].manual) manualIndices.push(i);
+        manualIndices.push(m.beats.length);
+
+        for (let j = 0; j < manualIndices.length - 1; j++) {
+            let leftIdx = manualIndices[j]; let rightIdx = manualIndices[j+1];
+            let leftVal = (leftIdx === -1) ? 0 : m.beats[leftIdx].val;
+            let rightVal = (rightIdx === m.beats.length) ? 1 : m.beats[rightIdx].val;
+            let count = rightIdx - leftIdx - 1;
+            if (count > 0) {
+                let step = (rightVal - leftVal) / (count + 1);
+                for (let k = 1; k <= count; k++) m.beats[leftIdx + k].val = leftVal + step * k;
+            }
+        }
+    },
+
+    resetBeatSpacing() {
+        if (this.selectedIdx === -1) return;
+        const m = this.measures[this.selectedIdx]; m.beats.forEach(b => b.manual = false);
+        this.redistributeBeats(m); this.saveState(); this.render();
+    },
+
+    toggleMetronomeBeat(beat) {
+        if (this.selectedIdx === -1) return;
+        const m = this.measures[this.selectedIdx];
+        if (!m.metronomeBeats) m.metronomeBeats = this.getDefaultMetronome(m.tsTop);
+        if (m.metronomeBeats.includes(beat)) m.metronomeBeats = m.metronomeBeats.filter(b => b !== beat);
+        else { m.metronomeBeats.push(beat); m.metronomeBeats.sort((a, b) => a - b); }
+        this.lastAttr.metronomeBeats = [...m.metronomeBeats];
+        this.saveState(); this.renderMetronomeButtons(); this.render();
+    },
+
+    setQuickTS(top, bottom) {
+        this.lastAttr.tsTop = top; this.lastAttr.tsBottom = bottom; this.lastAttr.metronomeBeats = this.getDefaultMetronome(top);
+        if (this.selectedIdx !== -1) {
+            this.measures[this.selectedIdx].tsTop = top; this.measures[this.selectedIdx].tsBottom = bottom;
+            this.measures[this.selectedIdx].metronomeBeats = this.getDefaultMetronome(top);
+            this.measures[this.selectedIdx].beats = this.getDefaultBeats(top); this.saveState();
+        }
+        this.renderTSButtons(); this.renderMetronomeButtons(); this.render();
+    },
+
+    setQuickKey(key) {
+        this.lastAttr.key = key;
+        if (this.selectedIdx !== -1) { this.measures[this.selectedIdx].key = key; this.saveState(); }
+        this.renderKeyButtons(); this.render();
+    },
+
+    showAlert(msg) {
+        document.getElementById('custom-alert-msg').innerText = msg;
+        document.getElementById('custom-alert-modal').classList.remove('hidden');
+    },
+
+    showCustomPrompt(msg, defaultVal, callback) {
+        document.getElementById('custom-prompt-msg').innerText = msg;
+        const input = document.getElementById('custom-prompt-input');
+        input.value = defaultVal || '';
+        this.customPromptCallback = callback;
+        document.getElementById('custom-prompt-modal').classList.remove('hidden');
+        
+        input.onkeydown = (e) => { if (e.key === 'Enter') this.submitCustomPrompt(); };
+        setTimeout(() => input.focus(), 50);
+    },
+
+    closeCustomPrompt() {
+        document.getElementById('custom-prompt-modal').classList.add('hidden');
+        this.customPromptCallback = null;
+    },
+
+    submitCustomPrompt() {
+        const val = document.getElementById('custom-prompt-input').value;
+        document.getElementById('custom-prompt-modal').classList.add('hidden');
+        if (this.customPromptCallback) this.customPromptCallback(val);
+        this.customPromptCallback = null;
+    },
+
+    promptAddTS() {
+        this.showCustomPrompt("Enter new Time Signature (e.g., 5/4):", "", (val) => {
+            if (val) {
+                const parts = val.split('/');
+                if (parts.length === 2) { 
+                    this.commonTS.push({top: parseInt(parts[0]), bottom: parseInt(parts[1])}); 
+                    this.saveState(); 
+                    this.renderTSButtons(); 
+                }
+            }
+        });
+    },
+
+    promptAddKey() {
+        this.showCustomPrompt("Enter new Key Signature (e.g., F#):", "", (val) => {
+            if (val && !this.commonKeys.includes(val)) { 
+                this.commonKeys.push(val); 
+                this.saveState(); 
+                this.renderKeyButtons(); 
+            }
+        });
+    },
+
+    renderTSButtons() {
+        const grid = document.getElementById('ins-ts-grid'); if (!grid) return; grid.innerHTML = '';
+        let activeTop = this.lastAttr.tsTop; let activeBot = this.lastAttr.tsBottom;
+        if (this.selectedIdx !== -1 && this.measures[this.selectedIdx]) {
+            activeTop = this.measures[this.selectedIdx].tsTop; activeBot = this.measures[this.selectedIdx].tsBottom;
+        }
+        this.commonTS.forEach((ts) => {
+            const btn = document.createElement('button');
+            btn.className = `ts-btn ${(ts.top === activeTop && ts.bottom === activeBot) ? 'active' : ''}`;
+            btn.innerText = `${ts.top}/${ts.bottom}`; btn.onclick = () => this.setQuickTS(ts.top, ts.bottom); grid.appendChild(btn);
+        });
+    },
+
+    renderKeyButtons() {
+        const grid = document.getElementById('ins-key-grid'); if (!grid) return; grid.innerHTML = '';
+        let activeKey = this.lastAttr.key;
+        if (this.selectedIdx !== -1 && this.measures[this.selectedIdx]) activeKey = this.measures[this.selectedIdx].key || 'C';
+        this.commonKeys.forEach((key) => {
+            const btn = document.createElement('button');
+            btn.className = `ts-btn ${(key === activeKey) ? 'active' : ''}`;
+            btn.innerText = key; btn.onclick = () => this.setQuickKey(key); grid.appendChild(btn);
+        });
+    },
+
+    renderMetronomeButtons() {
+        const grid = document.getElementById('ins-metronome-grid'); if (!grid) return; grid.innerHTML = '';
+        if (this.selectedIdx === -1 || !this.measures[this.selectedIdx]) return;
+        const m = this.measures[this.selectedIdx]; const top = m.tsTop;
+        const activeBeats = m.metronomeBeats || this.getDefaultMetronome(top);
+        for (let i = 1; i <= top; i++) {
+            const btn = document.createElement('button');
+            btn.className = `ts-btn ${activeBeats.includes(i) ? 'active' : ''}`;
+            btn.innerText = i; btn.style.padding = '5px'; btn.onclick = () => this.toggleMetronomeBeat(i); grid.appendChild(btn);
+        }
+    },
+
+    renderNoteAccidentalButtons() {
+        const grid = document.getElementById('ins-accidental-grid'); if (!grid) return; grid.innerHTML = '';
+        let activeVal = this.lastNoteAttr.accidental || 'auto';
+        if (this.currentPhase === 'NOTES' && this.activeNoteZone && this.selectedNoteIdx !== -1) {
+            activeVal = this.measures[this.activeNoteZone.mIdx].notes[this.selectedNoteIdx].accidental || 'auto';
+        }
+        const opts = [{ val: 'auto', label: 'Auto (A)' }, { val: 'natural', label: '♮ (N)' }, { val: 'sharp', label: '♯ (S)' }, { val: 'flat', label: '♭ (F)' }];
+        opts.forEach(o => {
+            const btn = document.createElement('button');
+            btn.className = `ts-btn ${activeVal === o.val ? 'active' : ''}`; btn.innerText = o.label;
+            btn.style.padding = '6px 2px'; btn.style.fontSize = '0.85em'; btn.onclick = () => this.updateNoteAttr('accidental', o.val); grid.appendChild(btn);
+        });
+    },
+
+    toggleStaffEditing() {
+        if (this.currentPhase !== 'MEASURES') return;
+        this.isStaffEditing = !this.isStaffEditing;
+        const btn = document.getElementById('btn-toggle-staff');
+        if (btn) {
+            btn.innerText = this.isStaffEditing ? "Done Adjusting Staff" : "Edit Staff Anchors";
+            btn.classList.toggle('toggle-on', this.isStaffEditing);
+        }
+        document.getElementById('staff-edit-hint')?.classList.toggle('hidden', !this.isStaffEditing);
+        this.render();
+    },
+
+    async handleImage(e) {
+        const files = Array.from(e.target.files); if (files.length === 0) return;
+        files.sort((a, b) => a.name.localeCompare(b.name));
+        const newPages = await Promise.all(files.map(file => new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (event) => { const img = new Image(); img.onload = () => resolve({ id: file.name, img: img }); img.src = event.target.result; };
+            reader.readAsDataURL(file);
+        })));
+        newPages.forEach(p => { if (!this.pages.find(existing => existing.id === p.id)) this.pages.push(p); });
+        if (this.pages.length > 0 && !this.activePageId) this.switchPage(this.pages[0].id);
+        else this.renderThumbnails();
+        e.target.value = '';
+    },
+
+    switchPage(pageId) {
+        this.activePageId = pageId; const p = this.pages.find(page => page.id === pageId);
+        if (p) { this.canvas.width = p.img.width; this.canvas.height = p.img.height; }
+        this.selectedIdx = -1; this.isStaffEditing = false; this.activeNoteZone = null; this.selectedNoteIdx = -1;
+        this.updateCanvasTransform(); this.updateInspector(); this.renderThumbnails(); this.render();
+    },
+
+    renderThumbnails() {
+        const container = document.getElementById('thumbnail-list'); 
+        if (!container) return;
+        container.innerHTML = '';
+        this.pages.forEach((p, index) => {
+            const el = document.createElement('div'); el.className = `thumb-wrap ${p.id === this.activePageId ? 'active' : ''}`; el.draggable = true;
+            el.ondragstart = (e) => e.dataTransfer.setData('text/plain', index.toString()); el.ondragover = (e) => e.preventDefault();
+            el.ondrop = (e) => {
+                e.preventDefault(); const oldIdx = parseInt(e.dataTransfer.getData('text/plain'));
+                if (oldIdx !== index && !isNaN(oldIdx)) {
+                    const moved = this.pages.splice(oldIdx, 1)[0]; this.pages.splice(index, 0, moved); this.saveState(); this.renderThumbnails();
+                }
+            };
+            el.onclick = () => this.switchPage(p.id);
+            const imgThumb = document.createElement('img'); imgThumb.src = p.img.src; el.appendChild(imgThumb);
+            const lbl = document.createElement('div'); lbl.className = 'thumb-label'; lbl.innerText = p.id; el.appendChild(lbl);
+            container.appendChild(el);
+        });
+    },
+
+    adjustZoom(delta, mouseX, mouseY) {
+        const rect = this.viewport.getBoundingClientRect();
+        let centerX = (mouseX === undefined) ? rect.width / 2 : mouseX - rect.left;
+        let centerY = (mouseY === undefined) ? rect.height / 2 : mouseY - rect.top;
+        const prevZoom = this.zoom; this.zoom = Math.max(0.1, Math.min(5.0, this.zoom + delta));
+        const canvasX = (centerX - this.offsetX) / prevZoom; const canvasY = (centerY - this.offsetY) / prevZoom;
+        this.offsetX = centerX - (canvasX * this.zoom); this.offsetY = centerY - (canvasY * this.zoom);
+        this.updateCanvasTransform(); 
+        const zd = document.getElementById('zoom-display'); if (zd) zd.innerText = `${Math.round(this.zoom * 100)}%`;
+    },
+
+    resetView() { 
+        this.zoom = 1.0; this.offsetX = 50; this.offsetY = 50; this.updateCanvasTransform(); 
+        const zd = document.getElementById('zoom-display'); if (zd) zd.innerText = `100%`; 
+    },
+    
+    updateCanvasTransform() { if (this.canvas) this.canvas.style.transform = `translate(${this.offsetX}px, ${this.offsetY}px) scale(${this.zoom})`; },
+    
+    handleWheel(e) { if (e.ctrlKey || e.metaKey) { e.preventDefault(); this.adjustZoom(e.deltaY > 0 ? -0.1 : 0.1, e.clientX, e.clientY); } },
+    
+    getMousePos(e) { const rect = this.viewport.getBoundingClientRect(); return { x: (e.clientX - rect.left - this.offsetX) / this.zoom, y: (e.clientY - rect.top - this.offsetY) / this.zoom }; },
+
+    updateCursor() {
+        if (!this.viewport) return;
+        if (this.spacePressed || this.isPanning) { this.viewport.style.cursor = this.isPanning ? 'grabbing' : 'grab'; return; }
+        if (this.currentPhase === 'NOTES') { this.viewport.style.cursor = (this.activeNoteZone && this.hoverState && this.hoverState.type === 'note') ? 'crosshair' : (!this.activeNoteZone && this.hoverState && this.hoverState.type === 'zone') ? 'pointer' : 'default'; return; }
+        if (this.currentPhase === 'BEATS') { this.viewport.style.cursor = (this.hoverState === 'beat') ? 'ew-resize' : (this.hoverState === 'subdivide' || this.hoverState === 'measure') ? 'pointer' : 'default'; return; }
+        if (this.currentPhase === 'MEASURES') { this.viewport.style.cursor = (this.hoverState === 'add') ? 'pointer' : (this.hoverState === 'right') ? 'ew-resize' : (this.hoverState === 'bottom') ? 'ns-resize' : (this.hoverState === 'measure') ? 'move' : 'crosshair'; }
+    },
+
+    exitNoteZone() { this.activeNoteZone = null; this.selectedIdx = -1; this.selectedNoteIdx = -1; this.updateInspector(); this.render(); },
+    
+    updateClefType(val) { if (!this.activeNoteZone) return; this.measures[this.activeNoteZone.mIdx].clefs[this.activeNoteZone.half] = val; this.saveState(); this.render(); },
+    
+    updateMeasureAttr(key, val) { if (this.selectedIdx !== -1) { this.measures[this.selectedIdx][key] = val; this.updateInspector(); this.saveState(); this.render(); } },
+    
+    updateNoteAttr(key, val) {
+        if (this.currentPhase === 'NOTES' && this.activeNoteZone && this.selectedNoteIdx !== -1) {
+            const m = this.measures[this.activeNoteZone.mIdx];
+            if (key === 'length') val = parseFloat(val) || 1;
+            if (key === 'dampen') val = val === true ? 'true' : (val === false ? 'false' : val);
+            m.notes[this.selectedNoteIdx][key] = val;
+        } else {
+            if (key === 'length') val = parseFloat(val) || 1;
+            if (key === 'dampen') val = val === true ? 'true' : (val === false ? 'false' : val);
+            this.lastNoteAttr[key] = val;
+        }
+        this.updateInspector(); this.saveState(); this.render();
+    },
+
+    deleteSelectedNote() {
+        if (this.currentPhase === 'NOTES' && this.activeNoteZone && this.selectedNoteIdx !== -1) {
+            this.measures[this.activeNoteZone.mIdx].notes.splice(this.selectedNoteIdx, 1);
+            this.selectedNoteIdx = -1; this.saveState(); this.updateInspector(); this.render();
+        }
+    },
+
+    onMouseDown(e) {
+        if (this.currentPhase === 'PARTS') return;
+        if (this.pages.length === 0 || !this.activePageId) return;
+        
+        const pos = this.getMousePos(e);
+
+        if (this.currentPhase === 'BEATS' && e.button === 2 && this.selectedIdx !== -1) {
+            const bIdx = this.findBeatLineAt(pos.x, pos.y);
+            if (bIdx !== -1) {
+                this.measures[this.selectedIdx].beats.splice(bIdx, 1);
+                this.saveState();
+                this.render();
+                return;
+            }
+        }
+
+        if (this.spacePressed || e.button === 2) { this.isPanning = true; this.startX = e.clientX; this.startY = e.clientY; this.updateCursor(); return; }
+
+        if (this.currentPhase === 'NOTES') {
+            if (!this.activeNoteZone) {
+                if (this.hoverState && this.hoverState.type === 'zone') {
+                    this.activeNoteZone = { mIdx: this.hoverState.mIdx, half: this.hoverState.half };
+                    this.selectedIdx = this.hoverState.mIdx; this.selectedNoteIdx = -1; this.updateInspector(); this.render();
+                }
+                return;
+            }
+            if (this.activeNoteZone && this.hoverState && this.hoverState.type === 'note') {
+                const m = this.measures[this.activeNoteZone.mIdx];
+                if (!m.notes) m.notes = [];
+                if (this.hoverState.existingIdx !== -1) {
+                    this.selectedNoteIdx = this.hoverState.existingIdx;
+                } else {
+                    m.notes.push({
+                        time: this.hoverState.beat.val, pitch: this.hoverState.pitch, half: this.activeNoteZone.half,
+                        accidental: this.lastNoteAttr.accidental || 'auto', length: parseFloat(this.lastNoteAttr.length) || 1,
+                        technique: this.lastNoteAttr.technique || 'none', partOverride: this.lastNoteAttr.partOverride || 'none', dampen: this.lastNoteAttr.dampen || 'auto', accent: this.lastNoteAttr.accent || 'none'
+                    });
+                    this.selectedNoteIdx = m.notes.length - 1;
+                }
+                this.updateInspector(); this.saveState(); this.render();
+            } else if (this.activeNoteZone) { this.selectedNoteIdx = -1; this.updateInspector(); this.render(); }
+            return;
+        }
+
+        if (this.currentPhase === 'BEATS') {
+            if (this.hoverState === 'subdivide' && this.subdivideTarget && this.selectedIdx !== -1) {
+                const m = this.measures[this.selectedIdx];
+                const s = this.subdivideTarget.start;
+                const e = this.subdivideTarget.end;
+                const divs = this.subdivideTarget.divs;
+                for (let d = 1; d < divs; d++) {
+                    m.beats.push({ val: s + (e - s) * (d / divs), isMain: false, manual: false });
+                }
+                m.beats.sort((a, b) => a.val - b.val); this.redistributeBeats(m); this.saveState(); this.render(); return;
+            }
+            if (this.hoverState === 'beat' && this.selectedIdx !== -1) {
+                const bIdx = this.findBeatLineAt(pos.x, pos.y);
+                if (bIdx !== -1) { 
+                    this.selectedBeatIdx = bIdx;
+                    this.isBeatDragging = true; 
+                    this.activeBeatIdx = bIdx; 
+                    this.updateInspector();
+                    return; 
+                }
+            }
+            const dragIdx = this.findMeasureAt(pos.x, pos.y);
+            if (dragIdx !== -1) { 
+                this.selectedIdx = dragIdx; 
+                this.selectedBeatIdx = -1;
+                this.updateInspector(); 
+                this.render(); 
+            } else { 
+                this.selectedIdx = -1; 
+                this.selectedBeatIdx = -1;
+                this.updateInspector(); 
+                this.render(); 
+            }
+            return;
+        }
+
+        if (this.currentPhase === 'MEASURES') {
+            if (this.hoverState === 'add' && this.selectedIdx !== -1) { this.addNextMeasure(); return; }
+            if (this.hoverState === 'right') { this.isResizingR = true; this.isStaffEditing = false; this.updateInspector(); return; }
+            if (this.hoverState === 'bottom') { this.isResizingB = true; this.isStaffEditing = false; this.updateInspector(); return; }
+
+            if (this.isStaffEditing && this.selectedIdx !== -1) {
+                const line = this.findStaffLineAt(pos.x, pos.y);
+                if (line) { this.isStaffDragging = true; this.activeLine = line; return; }
+            }
+
+            const dragIdx = this.findMeasureAt(pos.x, pos.y);
+            if (dragIdx !== -1) {
+                this.isDragging = true;
+                if (this.selectedIdx !== dragIdx) { this.selectedIdx = dragIdx; this.isStaffEditing = false; }
+                this.dragOffset = { x: pos.x - this.measures[dragIdx].x, y: pos.y - this.measures[dragIdx].y };
+                this.updateInspector(); this.render(); return;
+            }
+
+            this.selectedIdx = -1; this.isStaffEditing = false; this.updateInspector();
+            this.startX = pos.x; this.startY = pos.y; this.curX = pos.x; this.curY = pos.y; this.isDrawing = true;
+        }
+    },
+
+    addNextMeasure() {
+        const m = this.measures[this.selectedIdx];
+        this.measures.push({
+            pageId: this.activePageId, x: m.x + m.w, y: m.y, w: this.lastSize.w, h: m.h, 
+            tsTop: m.tsTop, tsBottom: m.tsBottom, key: m.key || this.lastAttr.key, bpm: m.bpm || this.lastAttr.bpm, volume: m.volume || this.lastAttr.volume,
+            beatVal: m.beatVal || this.lastAttr.beatVal, metronomeBeats: [...(m.metronomeBeats || this.getDefaultMetronome(m.tsTop))],
+            beats: m.beats.map(b => ({...b})), notes: [], clefs: { ...m.clefs }, staff: { ...m.staff }
+        });
+        this.selectedIdx = this.measures.length - 1; this.updateInspector(); this.saveState(); this.render();
+    },
+
+    onMouseMove(e) {
+        if (this.isResizingInspector) {
+            const inspector = document.getElementById('inspector');
+            const newWidth = window.innerWidth - e.clientX;
+            if (inspector && newWidth > 200 && newWidth < 800) { inspector.style.width = newWidth + 'px'; }
+            return;
+        }
+
+        if (this.currentPhase === 'PARTS') return;
+
+        if (this.isPanning) {
+            this.offsetX += e.clientX - this.startX; this.offsetY += e.clientY - this.startY;
+            this.startX = e.clientX; this.startY = e.clientY; this.updateCanvasTransform(); return;
+        }
+
+        const pos = this.getMousePos(e); this.curX = pos.x; this.curY = pos.y; this.hoverState = null; this.subdivideTarget = null;
+
+        if (this.currentPhase === 'NOTES') {
+            if (!this.activeNoteZone) {
+                const mIdx = this.findMeasureAt(pos.x, pos.y);
+                if (mIdx !== -1) {
+                    const m = this.measures[mIdx]; const staff = m.staff || this.globalStaff;
+                    const midY = m.y + m.h * ((staff.trebleBottom + staff.bassTop) / 2);
+                    this.hoverState = { type: 'zone', mIdx: mIdx, half: (pos.y < midY) ? 'top' : 'bottom' };
+                }
+            } else {
+                const mIdx = this.activeNoteZone.mIdx; const m = this.measures[mIdx]; const half = this.activeNoteZone.half;
+                if (pos.x >= m.x - (20/this.zoom) && pos.x <= m.x + m.w + (20/this.zoom)) {
+                    let nearestBeat = null; let minDist = Infinity;
+                    if (m.beats) { m.beats.forEach(b => { const dist = Math.abs(pos.x - (m.x + m.w * b.val)); if (dist < minDist) { minDist = dist; nearestBeat = b; } }); }
+                    if (minDist < 20 / this.zoom) {
+                        const p = this.getPitchFromY(m, half, pos.y); const py = this.getPitchY(m, half, p);
+                        const existingIdx = m.notes ? m.notes.findIndex(n => Math.abs(n.time - nearestBeat.val) < 0.001 && n.pitch === p && n.half === half) : -1;
+                        this.hoverState = { type: 'note', mIdx: mIdx, beat: nearestBeat, pitch: p, x: m.x + m.w * nearestBeat.val, y: py, existingIdx: existingIdx };
+                    }
+                }
+            }
+            this.updateCursor(); this.render(); return;
+        }
+
+        if (this.currentPhase === 'BEATS') {
+            if (this.isBeatDragging) {
+                const m = this.measures[this.selectedIdx];
+                let val = (pos.x - m.x) / m.w;
+                const prev = this.activeBeatIdx > 0 ? m.beats[this.activeBeatIdx - 1].val + 0.02 : 0;
+                const next = this.activeBeatIdx < m.beats.length - 1 ? m.beats[this.activeBeatIdx + 1].val - 0.02 : 1;
+                m.beats[this.activeBeatIdx].val = Math.max(prev, Math.min(next, val)); m.beats[this.activeBeatIdx].manual = true; 
+                this.redistributeBeats(m); this.render();
+            } else {
+                if (this.selectedIdx !== -1) {
+                    const bIdx = this.findBeatLineAt(pos.x, pos.y);
+                    if (bIdx !== -1) { this.hoverState = 'beat'; this.activeBeatIdx = bIdx; return; }
+                    const m = this.measures[this.selectedIdx];
+                    if (pos.x >= m.x && pos.x <= m.x + m.w && pos.y >= m.y && pos.y <= m.y + m.h) {
+                        let bounds = [0, ...m.beats.map(b => b.val), 1];
+                        const subdivideInput = document.getElementById('ins-subdivide');
+                        const divs = subdivideInput ? parseInt(subdivideInput.value) : 2;
+                        
+                        for (let i = 0; i < bounds.length - 1; i++) {
+                            for (let d = 1; d < divs; d++) {
+                                let target = bounds[i] + (bounds[i+1] - bounds[i]) * (d / divs);
+                                if (Math.abs(pos.x - (m.x + (m.w * target))) < 15 / this.zoom) { 
+                                    this.hoverState = 'subdivide'; 
+                                    this.subdivideTarget = { start: bounds[i], end: bounds[i+1], divs: divs }; 
+                                    break; 
+                                }
+                            }
+                            if (this.hoverState === 'subdivide') break;
+                        }
+                    }
+                }
+                if (!this.hoverState && this.findMeasureAt(pos.x, pos.y) !== -1) this.hoverState = 'measure';
+                this.updateCursor(); this.render(); 
+            }
+            return;
+        }
+
+        if (this.currentPhase === 'MEASURES') {
+            if (this.isStaffDragging) {
+                const m = this.measures[this.selectedIdx]; let val = (pos.y - m.y) / m.h;
+                if (!m.staff) m.staff = { ...this.globalStaff };
+                if (this.activeLine === 'trebleBottom') val = Math.max(0, Math.min(m.staff.bassTop - 0.05, val));
+                else if (this.activeLine === 'bassTop') val = Math.max(m.staff.trebleBottom + 0.05, Math.min(1, val));
+                m.staff[this.activeLine] = val; this.globalStaff[this.activeLine] = val;
+            } else if (this.isResizingR) { this.measures[this.selectedIdx].w = Math.max(10, pos.x - this.measures[this.selectedIdx].x); this.lastSize.w = this.measures[this.selectedIdx].w; }
+            else if (this.isResizingB) { this.measures[this.selectedIdx].h = Math.max(10, pos.y - this.measures[this.selectedIdx].y); this.lastSize.h = this.measures[this.selectedIdx].h; }
+            else if (this.isDragging) { this.measures[this.selectedIdx].x = pos.x - this.dragOffset.x; this.measures[this.selectedIdx].y = pos.y - this.dragOffset.y; }
+
+            if (!this.isDrawing && !this.isDragging && !this.isResizingR && !this.isResizingB && !this.isStaffDragging) {
+                if (this.selectedIdx !== -1) {
+                    const m = this.measures[this.selectedIdx]; const t = 10 / this.zoom;
+                    const addBtnX = m.x + m.w + 10/this.zoom; const addBtnY = m.y + m.h/2 - 15/this.zoom;
+                    if (pos.x >= addBtnX && pos.x <= addBtnX + 30/this.zoom && pos.y >= addBtnY && pos.y <= addBtnY + 30/this.zoom) this.hoverState = 'add';
+                    else if (Math.abs(pos.x - (m.x + m.w)) < t && pos.y >= m.y && pos.y <= m.y + m.h) this.hoverState = 'right';
+                    else if (Math.abs(pos.y - (m.y + m.h)) < t && pos.x >= m.x && pos.x <= m.x + m.w) this.hoverState = 'bottom';
+                }
+                if (!this.hoverState && this.findMeasureAt(pos.x, pos.y) !== -1) this.hoverState = 'measure';
+            }
+            this.updateCursor();
+            if (this.isDrawing || this.isDragging || this.isResizingR || this.isResizingB || this.isStaffDragging) this.render();
+        }
+    },
+
+    onMouseUp(e) {
+        if (this.isResizingInspector) {
+            this.isResizingInspector = false;
+            document.body.style.cursor = '';
+            document.getElementById('inspector-resizer')?.classList.remove('dragging');
+            return;
+        }
+
+        if (this.currentPhase === 'PARTS') return;
+        if (this.currentPhase === 'NOTES') { this.isPanning = false; return; }
+        if (this.currentPhase === 'BEATS') { if (this.isBeatDragging) { this.isBeatDragging = false; this.saveState(); this.render(); } this.isPanning = false; return; }
+        if (this.currentPhase !== 'MEASURES') { this.isPanning = false; return; }
+
+        const pos = this.getMousePos(e);
+
+        if (this.isDrawing) {
+            let w = pos.x - this.startX; let h = pos.y - this.startY; let safeX = this.startX; let safeY = this.startY;
+            if (Math.abs(w) < 10) w = this.lastSize.w; else if (w < 0) { safeX = this.startX + w; w = Math.abs(w); }
+            if (Math.abs(h) < 10) h = this.lastSize.h; else if (h < 0) { safeY = this.startY + h; h = Math.abs(h); }
+
+            this.measures.push({
+                pageId: this.activePageId, x: safeX, y: safeY, w: w, h: h,
+                tsTop: this.lastAttr.tsTop, tsBottom: this.lastAttr.tsBottom, key: this.lastAttr.key,
+                bpm: this.lastAttr.bpm, volume: this.lastAttr.volume, beatVal: this.lastAttr.beatVal,
+                metronomeBeats: [...(this.lastAttr.metronomeBeats || this.getDefaultMetronome(this.lastAttr.tsTop))],
+                beats: this.getDefaultBeats(this.lastAttr.tsTop), notes: [], clefs: { top: 'treble', bottom: 'bass' }, staff: { ...this.globalStaff }
+            });
+            this.selectedIdx = this.measures.length - 1; this.lastSize = { w: w, h: h }; this.updateInspector();
+        }
+        
+        if (this.isDrawing || this.isDragging || this.isResizingR || this.isResizingB || this.isStaffDragging) this.saveState();
+        this.isDrawing = this.isDragging = this.isResizingR = this.isResizingB = this.isPanning = this.isStaffDragging = false;
+        this.render();
+    },
+
+    findMeasureAt(x, y) {
+        for (let i = this.measures.length - 1; i >= 0; i--) {
+            const m = this.measures[i];
+            if ((m.pageId === this.activePageId || (!m.pageId && this.pages.length > 0 && this.activePageId === this.pages[0].id)) && x >= m.x && x <= m.x + m.w && y >= m.y && y <= m.y + m.h) return i;
+        }
+        return -1;
+    },
+
+    findStaffLineAt(x, y) {
+        if (this.selectedIdx === -1) return null;
+        const m = this.measures[this.selectedIdx];
+        if (m.pageId !== this.activePageId && (m.pageId || this.pages.length === 0 || this.activePageId !== this.pages[0].id)) return null; 
+        const staff = m.staff || this.globalStaff; const threshold = 20 / this.zoom; 
+        for (let line in staff) {
+            if (x >= m.x && x <= m.x + m.w && Math.abs(y - (m.y + (m.h * staff[line]))) < threshold) return line;
+        }
+        return null;
+    },
+    
+    findBeatLineAt(x, y) {
+        if (this.selectedIdx === -1) return -1;
+        const m = this.measures[this.selectedIdx];
+        if (m.pageId !== this.activePageId || !m.beats) return -1;
+        const threshold = 15 / this.zoom;
+        for (let i = 0; i < m.beats.length; i++) {
+            if (y >= m.y && y <= m.y + m.h && Math.abs(x - (m.x + (m.w * m.beats[i].val))) < threshold) return i;
+        }
+        return -1;
+    },
+
+    updateInspector() {
+        const content = document.getElementById('inspector-content'); const empty = document.getElementById('inspector-empty');
+        const title = document.getElementById('inspector-title'); const noteControls = document.getElementById('note-controls-panel');
+        const measureMeta = document.getElementById('measure-meta'); const notePanelTitle = document.getElementById('note-panel-title');
+
+        if (this.currentPhase === 'NOTES') {
+            if (measureMeta) measureMeta.classList.add('hidden'); 
+            if (noteControls) noteControls.classList.remove('hidden');
+            if (!this.activeNoteZone) {
+                if (content) content.classList.add('hidden'); 
+                if (empty) empty.classList.remove('hidden'); 
+                if (title) title.innerText = "Select a zone to edit notes."; 
+                return;
+            } else {
+                if (content) content.classList.remove('hidden'); 
+                if (empty) empty.classList.add('hidden');
+                const m = this.measures[this.activeNoteZone.mIdx];
+                
+                let activeTechVal = this.lastNoteAttr.technique || 'none';
+
+                if (this.selectedNoteIdx !== -1) {
+                    if (notePanelTitle) { notePanelTitle.innerText = "EDIT SELECTED NOTE"; notePanelTitle.style.color = "#f1c40f"; }
+                    if (title) title.innerText = `Edit Note: M${this.activeNoteZone.mIdx + 1} (${this.activeNoteZone.half.toUpperCase()})`;
+                    const n = m.notes[this.selectedNoteIdx];
+                    activeTechVal = n.technique || 'none';
+                    const lenInput = document.getElementById('ins-note-length'); if (lenInput) lenInput.value = n.length || 1;
+                    const overInput = document.getElementById('ins-note-override'); if (overInput) overInput.value = n.partOverride || 'none';
+                    const dampCont = document.getElementById('dampen-container'); if (dampCont) dampCont.classList.remove('hidden');
+                    let dampVal = n.dampen; let isAuto = false;
+                    if (dampVal === 'auto' || dampVal === undefined) { dampVal = this.computeAutoDampen(m, n, this.measures); isAuto = true; }
+                    else dampVal = (dampVal === true || dampVal === 'true');
+                    const dampInput = document.getElementById('ins-note-dampen'); if (dampInput) dampInput.checked = dampVal;
+                    const dampStatus = document.getElementById('dampen-status-text'); if (dampStatus) dampStatus.innerText = isAuto ? "Auto-Detected" : "Manual Override";
+                    const delBtn = document.getElementById('btn-delete-note'); if (delBtn) delBtn.classList.remove('hidden');
+                    const accentInput = document.getElementById('ins-note-accent'); if (accentInput) accentInput.value = n.accent || 'none';
+                } else {
+                    if (notePanelTitle) { notePanelTitle.innerText = "NOTE DEFAULTS (Next Note)"; notePanelTitle.style.color = "var(--note)"; }
+                    if (title) title.innerText = `Note Entry: M${this.activeNoteZone.mIdx + 1} (${this.activeNoteZone.half.toUpperCase()})`;
+                    const lenInput = document.getElementById('ins-note-length'); if (lenInput) lenInput.value = this.lastNoteAttr.length || 1;
+                    const overInput = document.getElementById('ins-note-override'); if (overInput) overInput.value = this.lastNoteAttr.partOverride || 'none';
+                    const dampCont = document.getElementById('dampen-container'); if (dampCont) dampCont.classList.add('hidden');
+                    const delBtn = document.getElementById('btn-delete-note'); if (delBtn) delBtn.classList.add('hidden');
+                    const accentInput = document.getElementById('ins-note-accent'); if (accentInput) accentInput.value = this.lastNoteAttr.accent || 'none';
+                }
+                const clefType = document.getElementById('ins-clef-type'); if (clefType) clefType.value = m.clefs[this.activeNoteZone.half];
+                
+                const techSelect = document.getElementById('ins-note-tech'); 
+                if (techSelect) techSelect.value = activeTechVal;
+                
+                this.renderNoteAccidentalButtons(); return;
+            }
+        } else if (this.currentPhase !== 'PARTS') {
+            if (measureMeta) measureMeta.classList.remove('hidden'); 
+            if (noteControls) noteControls.classList.add('hidden');
+        }
+
+        if (this.selectedIdx === -1) {
+            if (content) content.classList.add('hidden'); 
+            if (empty) empty.classList.remove('hidden'); 
+            if (title) title.innerText = "Selection: None"; 
+            this.isStaffEditing = false;
+        } else {
+            if (content) content.classList.remove('hidden'); 
+            if (empty) empty.classList.add('hidden');
+            const m = this.measures[this.selectedIdx]; 
+            if (title) title.innerText = `Measure ${this.selectedIdx + 1}`;
+            const insNum = document.getElementById('ins-num'); if (insNum) insNum.value = this.selectedIdx + 1;
+            const insKey = document.getElementById('ins-key'); if (insKey) insKey.value = m.key || 'C';
+            const insBpm = document.getElementById('ins-bpm'); if (insBpm) insBpm.value = m.bpm || this.lastAttr.bpm || 120;
+            const insVol = document.getElementById('ins-measure-vol'); if (insVol) insVol.value = m.volume || this.lastAttr.volume || 'mf';
+            
+            const btnStaff = document.getElementById('btn-toggle-staff');
+            if (btnStaff) {
+                btnStaff.innerText = this.isStaffEditing ? "Done Adjusting Staff" : "Edit Staff Anchors";
+                btnStaff.classList.toggle('toggle-on', this.isStaffEditing);
+            }
+            
+            const gridBeatsInput = document.getElementById('ins-grid-beats');
+            if (gridBeatsInput) gridBeatsInput.value = m.gridBeats || m.tsTop;
+            
+            const beatOverridePanel = document.getElementById('beat-override-panel');
+            if (this.currentPhase === 'BEATS' && this.selectedBeatIdx !== -1 && m.beats && m.beats[this.selectedBeatIdx]) {
+                if (beatOverridePanel) beatOverridePanel.classList.remove('hidden');
+                const b = m.beats[this.selectedBeatIdx];
+                const bpmInput = document.getElementById('ins-beat-bpm'); if (bpmInput) bpmInput.value = b.bpm || '';
+                const rampBpmInput = document.getElementById('ins-beat-ramp-bpm'); if (rampBpmInput) rampBpmInput.checked = !!b.rampBpm;
+                const volInput = document.getElementById('ins-beat-vol'); if (volInput) volInput.value = b.volume || '';
+                const rampVolInput = document.getElementById('ins-beat-ramp-vol'); if (rampVolInput) rampVolInput.checked = !!b.rampVol;
+            } else {
+                if (beatOverridePanel) beatOverridePanel.classList.add('hidden');
+            }
+        }
+        this.renderTSButtons(); this.renderKeyButtons(); this.renderMetronomeButtons();
+    },
+
+    updateSelectedAttr(key, val) {
+        if (this.selectedIdx !== -1) {
+            this.measures[this.selectedIdx][key] = val; this.lastAttr[key] = val;
+            if (key === 'tsTop') {
+                this.measures[this.selectedIdx].metronomeBeats = this.getDefaultMetronome(val);
+                this.measures[this.selectedIdx].beats = this.getDefaultBeats(val, this.measures[this.selectedIdx].gridBeats); 
+                this.lastAttr.metronomeBeats = [...this.measures[this.selectedIdx].metronomeBeats];
+                this.renderMetronomeButtons();
+            }
+            this.saveState(); this.render();
+        }
+    },
+
+    deleteSelected() {
+        if (this.selectedIdx !== -1) { this.measures.splice(this.selectedIdx, 1); this.selectedIdx = -1; this.updateInspector(); this.saveState(); this.render(); }
+    },
+
+    render() {
+        const ctx = this.ctx; 
+        if (!ctx) return;
+        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        const activePage = this.pages.find(p => p.id === this.activePageId);
+        if (activePage) ctx.drawImage(activePage.img, 0, 0);
+        else if (this.pages.length === 0 && this.currentPhase !== 'PARTS') {
+            ctx.fillStyle = "#bdc3c7"; ctx.font = `italic ${24 / this.zoom}px Segoe UI`;
+            ctx.fillText("No sheet music loaded. Click '+ Load Sheet Music' in the top right to begin.", 50 / this.zoom, 100 / this.zoom);
+        }
+
+        this.measures.forEach((m, i) => {
+            const isLegacyMatch = !m.pageId && this.pages.length > 0 && this.activePageId === this.pages[0].id;
+            if (m.pageId !== this.activePageId && !isLegacyMatch) return;
+
+            const isSelected = i === this.selectedIdx;
+            let dimFactor = 0.2; 
+            if (this.currentPhase === 'MEASURES') dimFactor = 1.0;
+            if (this.currentPhase === 'BEATS' && isSelected) dimFactor = 1.0;
+            if (this.currentPhase === 'NOTES') dimFactor = 0.4; 
+            
+            let strokeColor = `rgba(231, 76, 60, ${0.8 * dimFactor})`; let fillCol = `rgba(231, 76, 60, ${0.05 * dimFactor})`;
+            
+            if (isSelected) {
+                if (this.currentPhase === 'BEATS') { strokeColor = `rgba(155, 89, 182, ${dimFactor})`; fillCol = `rgba(155, 89, 182, ${0.1 * dimFactor})`; }
+                else if (this.currentPhase === 'MEASURES') { strokeColor = `rgba(241, 196, 15, ${dimFactor})`; fillCol = `rgba(241, 196, 15, ${0.15 * dimFactor})`; }
+                else if (this.currentPhase === 'NOTES') { strokeColor = `rgba(39, 174, 96, 0.4)`; fillCol = `transparent`;  }
+            } else if (this.currentPhase === 'NOTES') { fillCol = `transparent`; strokeColor = `rgba(39, 174, 96, 0.15)`; }
+
+            ctx.strokeStyle = strokeColor; ctx.lineWidth = isSelected ? 4/this.zoom : 2/this.zoom;
+            ctx.strokeRect(m.x, m.y, m.w, m.h);
+            if (this.currentPhase !== 'NOTES') { ctx.fillStyle = fillCol; ctx.fillRect(m.x, m.y, m.w, m.h); }
+
+            if (this.currentPhase === 'NOTES') {
+                const staff = m.staff || this.globalStaff; const midY = m.y + m.h * ((staff.trebleBottom + staff.bassTop) / 2);
+                let drawZone = false; let zTop, zHeight;
+                if (!this.activeNoteZone && this.hoverState && this.hoverState.type === 'zone' && this.hoverState.mIdx === i) {
+                    drawZone = true; zTop = this.hoverState.half === 'top' ? m.y : midY; zHeight = this.hoverState.half === 'top' ? midY - m.y : (m.y + m.h) - midY;
+                } else if (this.activeNoteZone && this.activeNoteZone.mIdx === i) {
+                    drawZone = true; zTop = this.activeNoteZone.half === 'top' ? m.y : midY; zHeight = this.activeNoteZone.half === 'top' ? midY - m.y : (m.y + m.h) - midY;
+                }
+                if (drawZone) { ctx.strokeStyle = "rgba(52, 152, 219, 0.9)"; ctx.lineWidth = 3 / this.zoom; ctx.strokeRect(m.x, zTop, m.w, zHeight); }
+            }
+
+            if (this.currentPhase === 'MEASURES') {
+                const staff = m.staff || this.globalStaff; const colors = { trebleBottom: '#3498db', bassTop: '#2ecc71' };
+                for (let line in staff) {
+                    if (!colors[line]) continue; 
+                    const lineY = m.y + (m.h * staff[line]);
+                    ctx.beginPath(); ctx.strokeStyle = colors[line]; ctx.lineWidth = (this.isStaffEditing && isSelected) ? 3/this.zoom : 1/this.zoom;
+                    ctx.moveTo(m.x, lineY); ctx.lineTo(m.x + m.w, lineY); ctx.stroke();
+                    if (this.isStaffEditing && isSelected) { ctx.fillStyle = colors[line]; ctx.beginPath(); ctx.arc(m.x, lineY, 5/this.zoom, 0, Math.PI*2); ctx.arc(m.x+m.w, lineY, 5/this.zoom, 0, Math.PI*2); ctx.fill(); }
+                }
+                if (this.isStaffEditing && isSelected) {
+                    ctx.beginPath(); ctx.strokeStyle = '#3498db'; ctx.lineWidth = 3/this.zoom; ctx.moveTo(m.x, m.y); ctx.lineTo(m.x + m.w, m.y); ctx.stroke();
+                    ctx.beginPath(); ctx.strokeStyle = '#2ecc71'; ctx.lineWidth = 3/this.zoom; ctx.moveTo(m.x, m.y + m.h); ctx.lineTo(m.x + m.w, m.y + m.h); ctx.stroke();
+                }
+            }
+
+            if (this.currentPhase === 'BEATS' || (this.currentPhase === 'NOTES' && this.activeNoteZone && this.activeNoteZone.mIdx === i)) {
+                const beats = m.beats || this.getDefaultBeats(m.tsTop);
+                if (this.currentPhase === 'BEATS' && this.hoverState === 'subdivide' && this.subdivideTarget && isSelected) {
+                    const phantomX = m.x + (m.w * this.subdivideTarget.val);
+                    ctx.beginPath(); ctx.strokeStyle = 'rgba(155, 89, 182, 0.5)'; ctx.lineWidth = 2 / this.zoom; ctx.setLineDash([4/this.zoom, 4/this.zoom]);
+                    ctx.moveTo(phantomX, m.y); ctx.lineTo(phantomX, m.y + m.h); ctx.stroke(); ctx.setLineDash([]);
+                    ctx.fillStyle = 'rgba(155, 89, 182, 0.8)'; ctx.font = `bold ${16/this.zoom}px Arial`; ctx.fillText("+", phantomX + 4/this.zoom, m.y - 8/this.zoom);
+                }
+                let mainIdx = 1;
+                beats.forEach((b, bIdx) => {
+                    const lineX = m.x + (m.w * b.val);
+                    const isHovered = (this.hoverState === 'beat' && this.activeBeatIdx === bIdx && isSelected) || (this.isBeatDragging && this.activeBeatIdx === bIdx && isSelected);
+                    
+                    ctx.beginPath();
+                    if (this.currentPhase === 'BEATS') {
+                        ctx.strokeStyle = isHovered ? '#fff' : (b.isMain ? 'var(--beat)' : 'rgba(155, 89, 182, 0.6)'); ctx.lineWidth = (isHovered ? 4 : (b.isMain ? 2 : 1.5)) / this.zoom;
+                        ctx.setLineDash(b.isMain ? [8/this.zoom, 4/this.zoom] : [2/this.zoom, 4/this.zoom]);
+                    } else { ctx.strokeStyle = 'rgba(46, 204, 113, 0.3)'; ctx.lineWidth = 1 / this.zoom; ctx.setLineDash([]); }
+                    ctx.moveTo(lineX, m.y - m.h); ctx.lineTo(lineX, m.y + m.h + m.h); ctx.stroke(); ctx.setLineDash([]);
+                    if (this.currentPhase === 'BEATS') {
+                        ctx.fillStyle = isHovered ? '#fff' : (b.manual ? 'var(--manual)' : 'var(--beat)');
+                        ctx.beginPath(); ctx.arc(lineX, m.y, (b.isMain ? 6 : 4)/this.zoom, 0, Math.PI*2); ctx.arc(lineX, m.y + m.h, (b.isMain ? 6 : 4)/this.zoom, 0, Math.PI*2); ctx.fill();
+                        if (b.isMain) { ctx.font = `bold ${12/this.zoom}px Arial`; ctx.fillStyle = isHovered ? '#fff' : 'var(--beat)'; ctx.fillText(mainIdx++, lineX + 6/this.zoom, m.y - 8/this.zoom); } 
+                        else { ctx.font = `normal ${10/this.zoom}px Arial`; ctx.fillStyle = 'rgba(155, 89, 182, 0.8)'; ctx.fillText("+", lineX + 4/this.zoom, m.y - 8/this.zoom); }
+                    }
+                });
+            }
+
+            if (this.currentPhase === 'NOTES' || this.currentPhase === 'BEATS') {
+                if (m.notes && m.notes.length > 0) {
+                    m.notes.forEach((n, nIdx) => {
+                        const nx = m.x + m.w * n.time; const ny = this.getPitchY(m, n.half, n.pitch);
+                        let renderColor = "#95a5a6"; let overridePartText = "";
+                        const resolvedAcc = this.resolveAccidental(n.pitch, n.accidental, m.key || 'C'); const nKey = `${n.pitch}_${resolvedAcc}`;
+                        if (this.assignments && this.assignments[nKey]) renderColor = this.assignments[nKey].color || "#95a5a6";
+                        if (n.partOverride && n.partOverride !== 'none') overridePartText = `P${n.partOverride}`;
+
+                        const clef = m.clefs[n.half]; const topPitch = clef === 'treble' ? 38 : 26; const bottomPitch = clef === 'treble' ? 30 : 18; 
+                        ctx.strokeStyle = "rgba(44, 62, 80, 0.8)"; ctx.lineWidth = 2 / this.zoom; const ledgerWidth = 24 / this.zoom;
+                        if (n.pitch > topPitch + 1) { for (let lp = topPitch + 2; lp <= n.pitch; lp += 2) { const ly = this.getPitchY(m, n.half, lp); ctx.beginPath(); ctx.moveTo(nx - ledgerWidth/2, ly); ctx.lineTo(nx + ledgerWidth/2, ly); ctx.stroke(); } }
+                        if (n.pitch < bottomPitch - 1) { for (let lp = bottomPitch - 2; lp >= n.pitch; lp -= 2) { const ly = this.getPitchY(m, n.half, lp); ctx.beginPath(); ctx.moveTo(nx - ledgerWidth/2, ly); ctx.lineTo(nx + ledgerWidth/2, ly); ctx.stroke(); } }
+                        
+                        const isNoteSelected = (this.currentPhase === 'NOTES' && this.activeNoteZone && this.activeNoteZone.mIdx === i && this.selectedNoteIdx === nIdx);
+                        let remLen = n.length || 1; let cMIdx = i; let cLogTime = this.getLogicalTime(m, n.time); let sX = nx; 
+                        
+                        const techBucket = (this.TECHNIQUES[n.technique || 'none'] || this.TECHNIQUES['none']).bucket;
+
+                        while (remLen > 0.001 && cMIdx < this.measures.length) {
+                            const curM = this.measures[cMIdx]; const isLegacyMatch = !curM.pageId && this.pages.length > 0 && this.activePageId === this.pages[0].id;
+                            let logAvail = curM.tsTop - cLogTime; let logConsume = Math.min(remLen, logAvail); let endLogTime = cLogTime + logConsume;
+                            let reachingNextDownbeat = (Math.abs(remLen - logAvail) < 0.001); let eX; let targetMIdx = cMIdx; let targetFrac = 0;
+
+                            if (remLen <= logAvail + 0.001) {
+                                if (reachingNextDownbeat && cMIdx + 1 < this.measures.length) {
+                                    targetMIdx = cMIdx + 1; const nextM = this.measures[targetMIdx];
+                                    const nextB = nextM.beats.filter(b => b.isMain).sort((a,b)=>a.val-b.val);
+                                    targetFrac = nextB.length > 0 ? nextB[0].val : 0; eX = nextM.x + nextM.w * targetFrac;
+                                } else { targetFrac = this.getFracFromLogicalTime(curM, endLogTime); eX = curM.x + curM.w * targetFrac; }
+                            } else { eX = curM.x + curM.w; }
+
+                            const curNy = this.getPitchY(curM, n.half, n.pitch); 
+
+                            if (curM.pageId === this.activePageId || isLegacyMatch) {
+                                
+                                // Do not draw the sustain trail box if it's a Bucket 3 percussive note
+                                if (techBucket !== 3) {
+                                    ctx.fillStyle = isNoteSelected ? "rgba(241, 196, 15, 0.4)" : this.hexToRgba(renderColor, 0.3);
+                                    ctx.fillRect(sX, curNy - 4/this.zoom, eX - sX, 8/this.zoom); 
+                                }
+                                
+                                if (remLen <= logAvail + 0.001) {
+                                    let needsDamp = true; 
+                                    let explicitDampen = n.dampen;
+                                    
+                                    // Never draw a physical dampen line for Bucket 1 or Bucket 3
+                                    if (techBucket === 1 || techBucket === 3) explicitDampen = false;
+                                    
+                                    if (explicitDampen === false || explicitDampen === 'false') needsDamp = false;
+                                    else if (explicitDampen === true || explicitDampen === 'true') needsDamp = true;
+                                    else {
+                                        if (targetMIdx !== -1 && targetMIdx < this.measures.length) {
+                                            const targetM = this.measures[targetMIdx];
+                                            if (targetM.notes) { for (let nn of targetM.notes) { if (nn === n) continue; if (nn.pitch === n.pitch && nn.half === n.half) { if (Math.abs(nn.time - targetFrac) < 0.05) { needsDamp = false; break; } } } }
+                                        }
+                                    }
+                                    if (needsDamp) {
+                                        const capX = Math.max(sX, eX - 2/this.zoom); 
+                                        ctx.beginPath(); ctx.strokeStyle = isNoteSelected ? "rgba(241, 196, 15, 0.8)" : this.hexToRgba(renderColor, 0.8); ctx.lineWidth = 2/this.zoom;
+                                        ctx.moveTo(capX, curNy - 8/this.zoom); ctx.lineTo(capX, curNy + 8/this.zoom); ctx.stroke();
+                                    }
+                                }
+                            }
+                            remLen -= logConsume; cMIdx++;
+                            if (cMIdx < this.measures.length && remLen > 0.001) {
+                                const nextM = this.measures[cMIdx]; const nextMainBeats = nextM.beats.filter(b => b.isMain).sort((a,b) => a.val - b.val);
+                                sX = nextM.x + nextM.w * (nextMainBeats.length > 0 ? nextMainBeats[0].val : 0); cLogTime = 0;
+                            }
+                        }
+
+                        ctx.fillStyle = isNoteSelected ? "#f1c40f" : this.hexToRgba(renderColor, 1.0); ctx.beginPath(); ctx.arc(nx, ny, 6 / this.zoom, 0, Math.PI*2); ctx.fill();
+                        ctx.strokeStyle = isNoteSelected ? "#fff" : "#111"; ctx.lineWidth = 2 / this.zoom; ctx.stroke();
+                        
+                        if (n.accidental === 'sharp') { ctx.fillStyle = isNoteSelected ? "#f1c40f" : this.hexToRgba(renderColor, 1.0); ctx.font = `${16/this.zoom}px Arial`; ctx.fillText("♯", nx - 18/this.zoom, ny + 5/this.zoom); } 
+                        else if (n.accidental === 'flat') { ctx.fillStyle = isNoteSelected ? "#f1c40f" : this.hexToRgba(renderColor, 1.0); ctx.font = `${16/this.zoom}px Arial`; ctx.fillText("♭", nx - 16/this.zoom, ny + 5/this.zoom); } 
+                        else if (n.accidental === 'natural') { ctx.fillStyle = isNoteSelected ? "#f1c40f" : this.hexToRgba(renderColor, 1.0); ctx.font = `${15/this.zoom}px Arial`; ctx.fillText("♮", nx - 16/this.zoom, ny + 5/this.zoom); }
+
+                        if (overridePartText) { ctx.fillStyle = "white"; ctx.font = `bold ${10/this.zoom}px Arial`; ctx.fillText(overridePartText, nx - 6/this.zoom, ny - 10/this.zoom); }
+                        
+                        if (n.accent && n.accent !== 'none') {
+                            ctx.fillStyle = isNoteSelected ? "#f1c40f" : "#e74c3c"; ctx.font = `bold ${14/this.zoom}px Arial`;
+                            let accText = n.accent === 'ghost' ? "(-)" : n.accent === 'accent' ? "(+)" : "(++)";
+                            ctx.fillText(accText, nx + 8/this.zoom, ny - 8/this.zoom);
+                        }
+                    });
+                }
+            }
+
+            let label = `M${i+1} [${m.tsTop}/${m.tsBottom}] ${m.key || 'C'} | ${m.bpm}bpm`;
+            ctx.font = `bold ${14 / this.zoom}px Segoe UI`; const textWidth = ctx.measureText(label).width;
+            ctx.fillStyle = `rgba(44, 62, 80, ${0.85 * dimFactor})`; ctx.fillRect(m.x, m.y, textWidth + (10/this.zoom), 28 / this.zoom);
+            let textCol = `rgba(231, 76, 60, ${dimFactor})`;
+            if (isSelected) {
+                if (this.currentPhase === 'BEATS') textCol = `rgba(155, 89, 182, 1.0)`;
+                else if (this.currentPhase === 'MEASURES') textCol = `rgba(241, 196, 15, 1.0)`;
+                else if (this.currentPhase === 'NOTES') textCol = `rgba(39, 174, 96, 1.0)`;
+            } else if (this.currentPhase === 'NOTES') { textCol = `rgba(39, 174, 96, 0.6)`; }
+            ctx.fillStyle = textCol; ctx.fillText(label, m.x + (5/this.zoom), m.y + (15/this.zoom));
+
+            if (this.currentPhase !== 'NOTES') {
+                const mBeats = m.metronomeBeats || Array.from({length: m.tsTop}, (_, idx) => idx + 1); const dotRadius = 2.5 / this.zoom; const spacing = 8 / this.zoom; const startX = m.x + (8 / this.zoom); const startY = m.y + (22 / this.zoom);
+                for(let b=1; b<=m.tsTop; b++) {
+                    ctx.beginPath(); ctx.arc(startX + (b-1)*spacing, startY, dotRadius, 0, Math.PI*2);
+                    if(mBeats.includes(b)) { ctx.fill(); } else { ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 1/this.zoom; ctx.stroke(); }
+                }
+            }
+
+            if (isSelected && this.currentPhase === 'MEASURES') {
+                ctx.fillStyle = "#f1c40f"; const handleThick = 4 / this.zoom;
+                ctx.fillRect(m.x + m.w - handleThick, m.y + (m.h*0.25), handleThick, m.h * 0.5); ctx.fillRect(m.x + (m.w*0.25), m.y + m.h - handleThick, m.w * 0.5, handleThick);
+                const btnX = m.x + m.w + 10/this.zoom; const btnY = m.y + m.h/2 - 15/this.zoom; const btnSize = 30/this.zoom;
+                ctx.fillStyle = this.hoverState === 'add' ? "#27ae60" : "rgba(46, 204, 113, 0.8)"; ctx.fillRect(btnX, btnY, btnSize, btnSize);
+                ctx.fillStyle = "#1a252f"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = `bold ${20 / this.zoom}px Arial`; ctx.fillText("+", btnX + btnSize/2, btnY + btnSize/2); ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+            }
+        });
+
+        if (this.currentPhase === 'NOTES' && this.hoverState && this.hoverState.type === 'note' && this.activeNoteZone) {
+            const m = this.measures[this.hoverState.mIdx]; const clef = m.clefs[this.activeNoteZone.half]; const topPitch = clef === 'treble' ? 38 : 26; const bottomPitch = clef === 'treble' ? 30 : 18; 
+            ctx.strokeStyle = "rgba(44, 62, 80, 0.5)"; ctx.lineWidth = 2 / this.zoom; const ledgerWidth = 24 / this.zoom;
+            if (this.hoverState.pitch > topPitch + 1) { for (let lp = topPitch + 2; lp <= this.hoverState.pitch; lp += 2) { const ly = this.getPitchY(m, this.activeNoteZone.half, lp); ctx.beginPath(); ctx.moveTo(this.hoverState.x - ledgerWidth/2, ly); ctx.lineTo(this.hoverState.x + ledgerWidth/2, ly); ctx.stroke(); } }
+            if (this.hoverState.pitch < bottomPitch - 1) { for (let lp = bottomPitch - 2; lp >= this.hoverState.pitch; lp -= 2) { const ly = this.getPitchY(m, this.activeNoteZone.half, lp); ctx.beginPath(); ctx.moveTo(this.hoverState.x - ledgerWidth/2, ly); ctx.lineTo(this.hoverState.x + ledgerWidth/2, ly); ctx.stroke(); } }
+            
+            let remLen = parseFloat(this.lastNoteAttr.length) || 1; let cMIdx = this.hoverState.mIdx; let sX = this.hoverState.x; let ny = this.hoverState.y; let cLogTime = this.getLogicalTime(m, this.hoverState.beat.val);
+            const techBucket = (this.TECHNIQUES[this.lastNoteAttr.technique || 'none'] || this.TECHNIQUES['none']).bucket;
+
+            while (remLen > 0.001 && cMIdx < this.measures.length) {
+                const curM = this.measures[cMIdx]; const isLegacyMatch = !curM.pageId && this.pages.length > 0 && this.activePageId === this.pages[0].id;
+                let logAvail = curM.tsTop - cLogTime; let logConsume = Math.min(remLen, logAvail); let endLogTime = cLogTime + logConsume;
+                let reachingNextDownbeat = (Math.abs(remLen - logAvail) < 0.001); let eX; let targetMIdx = cMIdx; let targetFrac = 0;
+
+                if (remLen <= logAvail + 0.001) {
+                    if (reachingNextDownbeat && cMIdx + 1 < this.measures.length) {
+                        targetMIdx = cMIdx + 1; const nextM = this.measures[targetMIdx];
+                        const nextB = nextM.beats.filter(b => b.isMain).sort((a,b)=>a.val-b.val);
+                        targetFrac = nextB.length > 0 ? nextB[0].val : 0; eX = nextM.x + nextM.w * targetFrac;
+                    } else { targetFrac = this.getFracFromLogicalTime(curM, endLogTime); eX = curM.x + curM.w * targetFrac; }
+                } else { eX = curM.x + curM.w; }
+
+                const curNy = this.getPitchY(curM, this.activeNoteZone.half, this.hoverState.pitch);
+                if (curM.pageId === this.activePageId || isLegacyMatch) {
+                    if (techBucket !== 3) {
+                        ctx.fillStyle = "rgba(46, 204, 113, 0.15)"; ctx.fillRect(sX, curNy - 4/this.zoom, eX - sX, 8/this.zoom);
+                    }
+                    if (remLen <= logAvail + 0.001) {
+                        let needsDamp = true; let explicitDampen = this.lastNoteAttr.dampen;
+                        if (techBucket === 1 || techBucket === 3) explicitDampen = false;
+
+                        if (explicitDampen === false || explicitDampen === 'false') needsDamp = false; else if (explicitDampen === true || explicitDampen === 'true') needsDamp = true; else {
+                            if (targetMIdx !== -1 && targetMIdx < this.measures.length) { const targetM = this.measures[targetMIdx]; if (targetM.notes) { for (let nn of targetM.notes) { if (nn.pitch === this.hoverState.pitch && nn.half === this.activeNoteZone.half) { if (Math.abs(nn.time - targetFrac) < 0.05) { needsDamp = false; break; } } } } }
+                        }
+                        if (needsDamp) { const capX = Math.max(sX, eX - 2/this.zoom); ctx.beginPath(); ctx.strokeStyle = "rgba(46, 204, 113, 0.5)"; ctx.lineWidth = 2/this.zoom; ctx.moveTo(capX, curNy - 8/this.zoom); ctx.lineTo(capX, curNy + 8/this.zoom); ctx.stroke(); }
+                    }
+                }
+                remLen -= logConsume; cMIdx++; if (cMIdx < this.measures.length && remLen > 0.001) { const nextM = this.measures[cMIdx]; const nextMainBeats = nextM.beats.filter(b => b.isMain).sort((a,b) => a.val - b.val); sX = nextM.x + nextM.w * (nextMainBeats.length > 0 ? nextMainBeats[0].val : 0); cLogTime = 0; }
+            }
+            ctx.strokeStyle = "rgba(39, 174, 96, 0.9)"; ctx.lineWidth = 2 / this.zoom; ctx.beginPath(); ctx.arc(this.hoverState.x, this.hoverState.y, 8 / this.zoom, 0, Math.PI*2); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(this.hoverState.x - 4/this.zoom, this.hoverState.y); ctx.lineTo(this.hoverState.x + 4/this.zoom, this.hoverState.y); ctx.moveTo(this.hoverState.x, this.hoverState.y - 4/this.zoom); ctx.lineTo(this.hoverState.x, this.hoverState.y + 4/this.zoom); ctx.stroke();
+            if (this.lastNoteAttr.accidental === 'sharp') { ctx.fillStyle = "rgba(39, 174, 96, 0.9)"; ctx.font = `${16/this.zoom}px Arial`; ctx.fillText("♯", this.hoverState.x - 18/this.zoom, this.hoverState.y + 5/this.zoom); } 
+            else if (this.lastNoteAttr.accidental === 'flat') { ctx.fillStyle = "rgba(39, 174, 96, 0.9)"; ctx.font = `${16/this.zoom}px Arial`; ctx.fillText("♭", this.hoverState.x - 16/this.zoom, this.hoverState.y + 5/this.zoom); } 
+            else if (this.lastNoteAttr.accidental === 'natural') { ctx.fillStyle = "rgba(39, 174, 96, 0.9)"; ctx.font = `${15/this.zoom}px Arial`; ctx.fillText("♮", this.hoverState.x - 16/this.zoom, this.hoverState.y + 5/this.zoom); }
+            const pName = this.getPitchName(this.hoverState.pitch); ctx.fillStyle = "rgba(44, 62, 80, 0.9)"; ctx.fillRect(this.hoverState.x + 12/this.zoom, this.hoverState.y - 25/this.zoom, 32/this.zoom, 18/this.zoom); ctx.fillStyle = "white"; ctx.font = `bold ${11/this.zoom}px Arial`; ctx.fillText(pName, this.hoverState.x + 16/this.zoom, this.hoverState.y - 12/this.zoom);
+        }
+
+        if (this.isDrawing && this.currentPhase === 'MEASURES') {
+            ctx.strokeStyle = "#f1c40f"; ctx.setLineDash([5/this.zoom, 5/this.zoom]); ctx.strokeRect(this.startX, this.startY, this.curX-this.startX, this.curY-this.startY); ctx.setLineDash([]);
+        }
+    }
+};
+
+window.app = app;
+window.onload = () => app.init();
+</script>
+</body>
+</html>
