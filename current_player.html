@@ -212,7 +212,7 @@
             </div>
             
             <div class="toolbar-section transparent">
-                <button class="ctrl-btn stop" onclick="app.showMenu()">⏹ Quit</button>
+                <button class="ctrl-btn stop" onclick="app.showMenu()">⏹ Menu</button>
             </div>
         </div>
 
@@ -299,7 +299,7 @@ const app = {
 
     playerState: {
         isPlaying: false, currentBeat: 0, lastTime: 0, partNum: 1, currentSongName: "",
-        partBells: [], flatNotes: [], flatMeasures: [], flatMetronomeBeats: [], flatVisualBeats: [],
+        partBells: [], bellGroups: [], flatNotes: [], flatMeasures: [], flatMetronomeBeats: [], flatVisualBeats: [],
         tempoEvents: [], volEvents: [],
         pixelsPerBeat: 250, pitchZoom: 1.0, tempoMultiplier: 1.0, metronomeVolume: 1.0, backgroundVolume: 0.4,
         isLooping: false, loopCountIn: true, loopStartMeasure: 0, loopEndMeasure: 1, metronomeEnabled: true, showSheetMusic: false,
@@ -394,10 +394,10 @@ const app = {
                 if (e.repeat) return; 
                 const key = e.key.toLowerCase();
                 if (this.playerState.bellKeyMap && this.playerState.bellKeyMap[key]) {
-                    const bell = this.playerState.bellKeyMap[key];
-                    if (bell.touchBtn) {
-                        bell.touchBtn.classList.add('active');
-                        bell.touchBtn.style.backgroundColor = this.hexToRgba(bell.color, 0.6);
+                    const group = this.playerState.bellKeyMap[key];
+                    if (group.touchBtn) {
+                        group.touchBtn.classList.add('active');
+                        group.touchBtn.style.backgroundColor = this.hexToRgba(group.color, 0.6);
                     }
                     this.handleBellRing(key);
                 }
@@ -408,10 +408,10 @@ const app = {
             if (document.getElementById('player-layout').style.display === 'flex') {
                 const key = e.key.toLowerCase();
                 if (this.playerState.bellKeyMap && this.playerState.bellKeyMap[key]) {
-                    const bell = this.playerState.bellKeyMap[key];
-                    if (bell.touchBtn) {
-                        bell.touchBtn.classList.remove('active');
-                        bell.touchBtn.style.backgroundColor = this.hexToRgba(bell.color, 0.2);
+                    const group = this.playerState.bellKeyMap[key];
+                    if (group.touchBtn) {
+                        group.touchBtn.classList.remove('active');
+                        group.touchBtn.style.backgroundColor = this.hexToRgba(group.color, 0.2);
                     }
                     this.handleBellDampen(key);
                 }
@@ -792,8 +792,9 @@ const app = {
         document.getElementById('player-metronome-vol').value = this.playerState.metronomeVolume * 100;
         document.getElementById('player-choir-vol').value = this.playerState.backgroundVolume * 100;
         
-        this.resizePlayerCanvas();
+        // IMPORTANT: Compile timeline before rendering so bellGroups is fully populated!
         this.compilePlaybackTimeline();
+        this.resizePlayerCanvas();
         
         // Fetch all required assets (MP3s + Sheet Music Images)
         await this.fetchAssetsForSong(this.playbackData);
@@ -1098,15 +1099,27 @@ const app = {
 
         this.playerState.partBells = Array.from(partBellsMap.values()).sort((a,b) => a.pitch - b.pitch); 
         
+        // --- NEW GROUPING LOGIC ---
+        const groupedBellsMap = new Map();
+        this.playerState.partBells.forEach(b => {
+            const pitchClass = b.pitch % 7;
+            const groupKey = `${pitchClass}_${b.acc}`;
+            if (!groupedBellsMap.has(groupKey)) {
+                groupedBellsMap.set(groupKey, { groupKey: groupKey, color: b.color, bells: [] });
+            }
+            groupedBellsMap.get(groupKey).bells.push(b);
+        });
+        this.playerState.bellGroups = Array.from(groupedBellsMap.values()).sort((a,b) => a.bells[0].pitch - b.bells[0].pitch);
+        
         const allKeys = ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';'];
-        const numBells = this.playerState.partBells.length;
-        let startIdx = 5 - Math.ceil(numBells / 2);
+        const numGroups = this.playerState.bellGroups.length;
+        let startIdx = 5 - Math.ceil(numGroups / 2);
         if (startIdx < 0) startIdx = 0;
         
         this.playerState.bellKeyMap = {};
-        this.playerState.partBells.forEach((b, i) => {
-            b.keyName = allKeys[(startIdx + i) % allKeys.length];
-            this.playerState.bellKeyMap[b.keyName] = b;
+        this.playerState.bellGroups.forEach((g, i) => {
+            g.keyName = allKeys[(startIdx + i) % allKeys.length];
+            this.playerState.bellKeyMap[g.keyName] = g;
         });
 
         this.renderTouchControls();
@@ -1116,29 +1129,29 @@ const app = {
         const container = document.getElementById('touch-controls');
         container.innerHTML = '';
         
-        this.playerState.partBells.forEach(b => {
+        this.playerState.bellGroups.forEach(g => {
             const btn = document.createElement('button');
             btn.className = 'touch-bell-btn';
-            btn.style.borderColor = b.color;
-            btn.style.backgroundColor = this.hexToRgba(b.color, 0.2);
+            btn.style.borderColor = g.color;
+            btn.style.backgroundColor = this.hexToRgba(g.color, 0.2);
             
             const press = (e) => {
                 if (e) e.preventDefault();
-                const heldData = this.playerState.heldKeys[b.keyName];
+                const heldData = this.playerState.heldKeys[g.keyName];
                 if (!heldData || !heldData.active) {
                     btn.classList.add('active');
-                    btn.style.backgroundColor = this.hexToRgba(b.color, 0.6);
-                    this.handleBellRing(b.keyName);
+                    btn.style.backgroundColor = this.hexToRgba(g.color, 0.6);
+                    this.handleBellRing(g.keyName);
                 }
             };
             
             const release = (e) => {
                 if (e) e.preventDefault();
-                const heldData = this.playerState.heldKeys[b.keyName];
+                const heldData = this.playerState.heldKeys[g.keyName];
                 if (heldData && heldData.active) {
                     btn.classList.remove('active');
-                    btn.style.backgroundColor = this.hexToRgba(b.color, 0.2);
-                    this.handleBellDampen(b.keyName);
+                    btn.style.backgroundColor = this.hexToRgba(g.color, 0.2);
+                    this.handleBellDampen(g.keyName);
                 }
             };
 
@@ -1149,11 +1162,14 @@ const app = {
             btn.addEventListener('touchend', release);
             btn.addEventListener('touchcancel', release);
 
-            let pName = this.getPitchName(b.pitch);
-            if (b.acc === 'sharp') pName += '♯'; else if (b.acc === 'flat') pName += '♭';
+            let labels = g.bells.map(b => {
+                let pName = this.getPitchName(b.pitch);
+                if (b.acc === 'sharp') pName += '♯'; else if (b.acc === 'flat') pName += '♭';
+                return pName;
+            });
 
-            btn.innerHTML = `<span>${pName}</span><span class="bell-key">${b.keyName.toUpperCase()}</span>`;
-            b.touchBtn = btn;
+            btn.innerHTML = `<span style="font-size: 0.8em; text-align: center;">${labels.join('+')}</span><span class="bell-key">${g.keyName.toUpperCase()}</span>`;
+            g.touchBtn = btn;
             container.appendChild(btn);
         });
     },
@@ -1300,70 +1316,94 @@ const app = {
     handleBellRing(keyName) {
         this.initAudio();
         if (!this.playerState.isPlaying) return;
-        const bell = this.playerState.bellKeyMap[keyName];
-        if (!bell) return;
+        const group = this.playerState.bellKeyMap[keyName];
+        if (!group) return;
         
         const currentB = this.playerState.currentBeat;
         const hitWindow = 0.4; 
-        const nKey = `${bell.pitch}_${bell.acc}`;
+        
+        this.playerState.heldKeys[keyName] = { active: true, notes: [] };
 
-        let nearestNote = null, minDist = Infinity;
-        this.playerState.flatNotes.forEach(n => {
-            if (n.nKey === nKey && n.isPlayer && !n.hit) {
-                const dist = Math.abs(n.absStart - currentB);
-                if (dist < hitWindow && dist < minDist) { minDist = dist; nearestNote = n; }
-            }
+        let groupHasValidHit = false;
+        let notesToRing = [];
+
+        group.bells.forEach(bell => {
+            const nKey = `${bell.pitch}_${bell.acc}`;
+            let nearestNote = null, minDist = Infinity;
+            
+            this.playerState.flatNotes.forEach(n => {
+                if (n.nKey === nKey && n.isPlayer && !n.hit) {
+                    const dist = Math.abs(n.absStart - currentB);
+                    if (dist < hitWindow && dist < minDist) { minDist = dist; nearestNote = n; }
+                }
+            });
+
+            notesToRing.push({ bell, nearestNote });
+            if (nearestNote) groupHasValidHit = true;
         });
 
-        let currentVol = this.getInterpolatedValue(this.playerState.volEvents, currentB) || 0.8;
-        let accentMult = nearestNote ? (this.ACCENT_MAP[nearestNote.accent] || 1.0) : 1.0;
-        let tech = nearestNote ? (nearestNote.tech || 'none') : 'none';
-        
-        this.playTone(bell.pitch, bell.acc, currentVol * accentMult * 1.2, tech);
-
-        this.playerState.heldKeys[keyName] = { active: true, note: nearestNote };
-
-        if (nearestNote) {
-            nearestNote.hit = true;
-            this.playerState.flares.push({ x: 150, y: this.getPlayerPitchY(nearestNote.pitch), color: nearestNote.color, time: performance.now(), life: 1.0 });
-        } else {
-            this.playerState.flares.push({ x: 150, y: this.getPlayerPitchY(bell.pitch), color: "#7f8c8d", time: performance.now(), life: 0.5 });
+        if (!groupHasValidHit) {
+            this.playerState.extraHits++;
+            this.updateScoreDisplay();
         }
+
+        notesToRing.forEach(({ bell, nearestNote }) => {
+            let currentVol = this.getInterpolatedValue(this.playerState.volEvents, currentB) || 0.8;
+            let tech = nearestNote ? (nearestNote.tech || 'none') : 'none';
+            
+            if (nearestNote) {
+                let accentMult = this.ACCENT_MAP[nearestNote.accent] || 1.0;
+                this.playTone(bell.pitch, bell.acc, currentVol * accentMult * 1.2, tech);
+
+                nearestNote.hit = true;
+                this.playerState.heldKeys[keyName].notes.push(nearestNote);
+                this.playerState.flares.push({ x: 150, y: this.getPlayerPitchY(nearestNote.pitch), color: nearestNote.color, time: performance.now(), life: 1.0 });
+            } else {
+                if (!groupHasValidHit) {
+                    this.playTone(bell.pitch, bell.acc, currentVol * 0.25, tech);
+                    this.playerState.flares.push({ x: 150, y: this.getPlayerPitchY(bell.pitch), color: "#7f8c8d", time: performance.now(), life: 0.5 });
+                }
+            }
+        });
     },
 
     handleBellDampen(keyName) {
         if (!this.playerState.isPlaying) return;
-        const bell = this.playerState.bellKeyMap[keyName];
-        if (!bell) return;
+        const group = this.playerState.bellKeyMap[keyName];
+        if (!group) return;
 
         const heldData = this.playerState.heldKeys[keyName];
-        let shouldDampen = true;
+        
+        group.bells.forEach(bell => {
+            let shouldDampen = true;
 
-        if (heldData && heldData.note) {
-            const activeNote = heldData.note;
-            
-            if (!activeNote.dampen) {
-                shouldDampen = false; // It's an LV or continuous note, let it ring
-            } else {
-                const currentB = this.playerState.currentBeat;
-                const endBeat = activeNote.absStart + activeNote.length;
-                if (!activeNote.dampenedOff) {
-                    activeNote.dampenedOff = true;
-                    if (Math.abs(endBeat - currentB) < 0.4) {
-                        // Perfect dampen visually
-                        this.playerState.flares.push({ x: 150, y: this.getPlayerPitchY(activeNote.pitch), color: "#3498db", time: performance.now(), life: 1.0 });
-                    } else if (currentB < endBeat - 0.4) {
-                        // Let go of key too early! Score penalty.
-                        activeNote.dampenMissed = true;
-                        this.registerMiss(activeNote);
+            if (heldData && heldData.notes) {
+                const activeNote = heldData.notes.find(n => n.pitch === bell.pitch && n.acc === bell.acc);
+                if (activeNote) {
+                    if (!activeNote.dampen) {
+                        shouldDampen = false; // It's an LV or continuous note, let it ring
+                    } else {
+                        const currentB = this.playerState.currentBeat;
+                        const endBeat = activeNote.absStart + activeNote.length;
+                        if (!activeNote.dampenedOff) {
+                            activeNote.dampenedOff = true;
+                            if (Math.abs(endBeat - currentB) < 0.4) {
+                                // Perfect dampen visually
+                                this.playerState.flares.push({ x: 150, y: this.getPlayerPitchY(activeNote.pitch), color: "#3498db", time: performance.now(), life: 1.0 });
+                            } else if (currentB < endBeat - 0.4) {
+                                // Let go of key too early! Score penalty.
+                                activeNote.dampenMissed = true;
+                                this.registerMiss(activeNote);
+                            }
+                        }
                     }
                 }
             }
-        }
-        
-        if (shouldDampen) {
-            this.dampenTone(bell.pitch, bell.acc);
-        }
+            
+            if (shouldDampen) {
+                this.dampenTone(bell.pitch, bell.acc);
+            }
+        });
         
         if (this.playerState.heldKeys[keyName]) {
             this.playerState.heldKeys[keyName].active = false;
@@ -1439,6 +1479,7 @@ const app = {
         this.playerState.currentBeat = beat; 
         
         this.playerState.missedActions = 0;
+        this.playerState.extraHits = 0;
         this.playerState.heldKeys = {};
         this.playerState.flares = [];
         
@@ -1828,28 +1869,52 @@ const app = {
         ctx.beginPath(); ctx.strokeStyle = "rgba(231, 76, 60, 0.8)"; ctx.lineWidth = 4;
         ctx.moveTo(strikeLineX, 0); ctx.lineTo(strikeLineX, height); ctx.stroke();
 
-        this.playerState.partBells.forEach(b => {
-            const y = this.getPlayerPitchY(b.pitch);
-            if (y < -50 || y > height + 50) return;
-            
-            const heldData = this.playerState.heldKeys[b.keyName];
+        (this.playerState.bellGroups || []).forEach(g => {
+            const heldData = this.playerState.heldKeys[g.keyName];
             const isHeld = heldData && heldData.active;
             
-            ctx.fillStyle = this.hexToRgba(b.color, isHeld ? 0.6 : 0.2); 
-            ctx.beginPath(); ctx.arc(strikeLineX, y, 20, 0, Math.PI*2); ctx.fill();
+            let sumY = 0;
+            let validBells = 0;
+            let minY = Infinity;
+            let maxY = -Infinity;
+
+            g.bells.forEach(b => {
+                const y = this.getPlayerPitchY(b.pitch);
+                if (y < -50 || y > height + 50) return;
+                sumY += y;
+                validBells++;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+                
+                ctx.fillStyle = this.hexToRgba(g.color, isHeld ? 0.6 : 0.2); 
+                ctx.beginPath(); ctx.arc(strikeLineX, y, 20, 0, Math.PI*2); ctx.fill();
+                
+                ctx.fillStyle = g.color; ctx.font = "bold 12px Arial"; ctx.textAlign = "left";
+                let pName = this.getPitchName(b.pitch);
+                if (b.acc === 'sharp') pName += '♯'; else if (b.acc === 'flat') pName += '♭';
+                ctx.fillText(pName, strikeLineX + 30, y);
+            });
             
-            ctx.fillStyle = isHeld ? b.color : "#1a252f"; 
-            ctx.fillRect(strikeLineX - 40, y - 12, 24, 24);
-            ctx.strokeStyle = b.color; ctx.lineWidth = 2; ctx.strokeRect(strikeLineX - 40, y - 12, 24, 24);
-            
-            ctx.fillStyle = isHeld ? "#111" : "white"; 
-            ctx.font = "bold 14px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-            ctx.fillText(b.keyName.toUpperCase(), strikeLineX - 28, y);
-            
-            ctx.fillStyle = b.color; ctx.font = "bold 12px Arial"; ctx.textAlign = "left";
-            let pName = this.getPitchName(b.pitch);
-            if (b.acc === 'sharp') pName += '♯'; else if (b.acc === 'flat') pName += '♭';
-            ctx.fillText(pName, strikeLineX + 30, y);
+            if (validBells > 0) {
+                const avgY = sumY / validBells;
+                
+                if (validBells > 1) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = this.hexToRgba(g.color, 0.4);
+                    ctx.lineWidth = 4;
+                    ctx.moveTo(strikeLineX - 20, minY);
+                    ctx.lineTo(strikeLineX - 20, maxY);
+                    ctx.stroke();
+                }
+
+                ctx.fillStyle = isHeld ? g.color : "#1a252f"; 
+                ctx.fillRect(strikeLineX - 40, avgY - 12, 24, 24);
+                ctx.strokeStyle = g.color; ctx.lineWidth = 2; ctx.strokeRect(strikeLineX - 40, avgY - 12, 24, 24);
+                
+                ctx.fillStyle = isHeld ? "#111" : "white"; 
+                ctx.font = "bold 14px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                ctx.fillText(g.keyName.toUpperCase(), strikeLineX - 28, avgY);
+            }
         });
 
         const now = performance.now();
